@@ -1,0 +1,160 @@
+#!/usr/bin/env python3
+"""
+Builds the proton-vpn-cli-macos wheel, into macos/dist.
+
+Proton doesn't publish its Python packages to PyPI, so the wheel bundles them: proton-core and
+proton-vpn-api-core (the submodules in macos/vendor), Proton's CLI (this repo) and the macOS
+backends, plus Proton's Rust extension built for macOS. Their dependencies come from PyPI, as
+the installed copies in macos/.venv declare them, without the Linux-only ones.
+
+Usage: scripts/build-wheel [--version X.Y.Z] [--universal]
+  --universal  builds the Rust extension for Apple Silicon and Intel (needs both rustup targets)
+"""
+import argparse
+import importlib.metadata
+import json
+import re
+import shutil
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
+
+MACOS = Path(__file__).resolve().parent.parent
+ROOT = MACOS.parent
+STAGE = MACOS / "build" / "wheel"
+SOURCES = [
+    MACOS / "vendor" / "python-proton-core" / "proton",
+    MACOS / "vendor" / "python-proton-vpn-api-core" / "proton",
+    ROOT / "proton",
+    MACOS / "src" / "proton",
+]
+BUNDLED = ["proton-core", "proton-vpn-api-core", "proton-vpn-cli"]
+# Dependencies only Proton's Linux backends use.
+LINUX_ONLY = {"pygobject", "pycairo", "proton-keyring-linux", "proton-vpn-local-agent"}
+# Plugins proton-core registers in its own package metadata, which the bundled copy needs too.
+CORE_ENTRY_POINTS = {
+    "proton_loader_keyring": {"json": "proton.keyring.textfile:KeyringBackendJsonFiles"},
+    "proton_loader_transport": {
+        "requests": "proton.session.transports.requests:RequestsTransport",
+        "alternativerouting": "proton.session.transports.alternativerouting:AlternativeRoutingTransport",
+        "aiohttp": "proton.session.transports.aiohttp:AiohttpTransport",
+        "auto": "proton.session.transports.auto:AutoTransport",
+    },
+    "proton_loader_environment": {"prod": "proton.session.environments:ProdEnvironment"},
+    "proton_loader_basicview": {"cli": "proton.views.basiccli:BasicCLIView"},
+}
+
+
+def run(*args, **kwargs):
+    print("+", " ".join(str(a) for a in args), flush=True)
+    subprocess.run([str(a) for a in args], check=True, **kwargs)
+
+
+def build_platform(universal: bool) -> Path:
+    """Proton's Rust extension, for this Mac's architecture or both."""
+    so = MACOS / "src" / "proton" / "vpn" / "platform.abi3.so"
+    if not universal:
+        run(MACOS / "scripts" / "build-platform")
+        return so
+    parts = []
+    for target in ("aarch64-apple-darwin", "x86_64-apple-darwin"):
+        run(MACOS / "scripts" / "build-platform", target)
+        part = MACOS / "build" / f"platform-{target}.so"
+        shutil.copy(so, part)
+        parts.append(part)
+    run("lipo", "-create", *parts, "-output", so)
+    return so
+
+
+def dependencies() -> list[str]:
+    """What the bundled packages need from PyPI, from their installed metadata."""
+    found = []
+    for name in BUNDLED:
+        for requirement in importlib.metadata.requires(name) or []:
+            if "extra ==" in requirement:
+                continue
+            package = re.split(r"[\s<>=!~;\[]", requirement, maxsplit=1)[0].lower()
+            if package.startswith("proton-") or package in LINUX_ONLY:
+                continue
+            if requirement not in found:
+                found.append(requirement)
+    return sorted(found, key=str.lower)
+
+
+def pyproject(version: str) -> str:
+    project = tomllib.loads((MACOS / "pyproject.toml").read_text())["project"]
+    entry_points = {**CORE_ENTRY_POINTS}
+    for group, entries in project.get("entry-points", {}).items():
+        entry_points[group] = {**entry_points.get(group, {}), **entries}
+
+    def table(entries):
+        return "\n".join(f'{key} = "{value}"' for key, value in entries.items())
+
+    groups = "\n\n".join(f'[project.entry-points.{group}]\n{table(entries)}' for group, entries in entry_points.items())
+    deps = ",\n".join(f'    "{d}"' for d in dependencies())
+    return f'''[project]
+name = "{project["name"]}"
+version = "{version}"
+description = "{project["description"]}"
+readme = "README.md"
+license = "{project["license"]}"
+license-files = ["LICENSE"]
+requires-python = "{project["requires-python"]}"
+classifiers = ["Operating System :: MacOS", "Environment :: Console", "Topic :: Internet"]
+dependencies = [
+{deps}
+]
+
+[project.urls]
+Homepage = "{project["urls"]["Homepage"]}"
+
+[project.scripts]
+{table(project["scripts"])}
+
+{groups}
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["proton"]
+artifacts = ["proton/vpn/platform.abi3.so"]
+'''
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--version")
+    parser.add_argument("--universal", action="store_true")
+    args = parser.parse_args()
+    version = args.version or tomllib.loads((MACOS / "pyproject.toml").read_text())["project"]["version"]
+
+    so = build_platform(args.universal)
+
+    shutil.rmtree(STAGE, ignore_errors=True)
+    for source in SOURCES:
+        shutil.copytree(source, STAGE / "proton", dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.so"))
+    shutil.copy(so, STAGE / "proton" / "vpn" / "platform.abi3.so")
+    (STAGE / "proton" / "vpn" / "macos" / "bundled.json").write_text(
+        json.dumps({name: importlib.metadata.version(name) for name in BUNDLED}))
+    shutil.copy(MACOS / "README.md", STAGE / "README.md")
+    shutil.copy(ROOT / "LICENSE", STAGE / "LICENSE")
+    (STAGE / "pyproject.toml").write_text(pyproject(version))
+
+    dist = MACOS / "dist"
+    dist.mkdir(exist_ok=True)
+    run("uv", "build", "--wheel", "--out-dir", dist, STAGE)
+    built = dist / f"proton_vpn_cli_macos-{version}-py3-none-any.whl"
+    # The Rust extension makes it a macOS wheel for CPython 3.12+ (it uses the stable ABI).
+    platform = "macosx_11_0_universal2" if args.universal else (
+        "macosx_11_0_arm64" if subprocess.run(["uname", "-m"], capture_output=True, text=True).stdout.strip() == "arm64"
+        else "macosx_10_12_x86_64")
+    run(sys.executable, "-m", "wheel", "tags", "--remove", "--python-tag", "cp312", "--abi-tag", "abi3",
+        "--platform-tag", platform, built)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,53 @@
+[project]
+name = "proton-vpn-cli-macos"
+version = "0.1.0"
+description = "Proton VPN's official CLI on macOS: a WireGuard backend, pf kill switch and Keychain sign-in for Proton's own code"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+requires-python = ">=3.12"
+dependencies = [
+    "proton-core",
+    "proton-vpn-api-core",
+    "proton-vpn-cli",
+]
+
+[project.urls]
+Homepage = "https://github.com/stevelacey/proton-vpn-cli-macos"
+
+[project.scripts]
+protonvpn = "proton.vpn.macos.cli:main"
+vpn = "proton.vpn.macos.vpn:main"
+
+[project.entry-points.proton_loader_keyring]
+keychain = "proton.vpn.macos.keychain:KeychainKeyring"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "wheel",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/proton"]
+
+[tool.uv]
+environments = ["sys_platform == 'darwin'"]
+# Linux-only dependencies of Proton's packages, which the macOS backend doesn't use.
+override-dependencies = [
+    "pygobject; sys_platform == 'linux'",
+    "pycairo; sys_platform == 'linux'",
+    "proton-keyring-linux; sys_platform == 'linux'",
+    "proton-vpn-local-agent; sys_platform == 'linux'",
+]
+
+[tool.uv.sources]
+proton-core = { path = "vendor/python-proton-core", editable = true }
+proton-vpn-api-core = { path = "vendor/python-proton-vpn-api-core", editable = true }
+proton-vpn-cli = { path = "..", editable = true }

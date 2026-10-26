@@ -1,3 +1,9 @@
 [submodule "scripts/devtools"]
 	path = scripts/devtools
 	url = ../integration/devtools.git
+[submodule "macos/vendor/python-proton-core"]
+	path = macos/vendor/python-proton-core
+	url = https://github.com/ProtonVPN/python-proton-core
+[submodule "macos/vendor/python-proton-vpn-api-core"]
+	path = macos/vendor/python-proton-vpn-api-core
+	url = https://github.com/ProtonVPN/python-proton-vpn-api-core

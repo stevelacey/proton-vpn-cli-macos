@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  pull_request: ~
+  push: ~
+
+jobs:
+  test:
+    name: Test
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: macos
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check out Proton's core libraries
+        run: git submodule update --init --depth 1 vendor/python-proton-core vendor/python-proton-vpn-api-core
+
+      - uses: astral-sh/setup-uv@v7
+
+      - name: Build Proton's Rust extension
+        run: scripts/build-platform
+
+      - run: uv sync --locked
+      - run: uv run pytest
+      - uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: macos/coverage.xml
+      - run: uv run vpn help
+      - run: uv run protonvpn --help

@@ -1,3 +1,8 @@
+> [!NOTE]
+> **This fork adds macOS support.** See [macos/README.md](macos/README.md):
+> `brew install stevelacey/tap/proton-vpn-cli-macos`. Unofficial, not made or endorsed by Proton AG;
+> everything else here is Proton's CLI as they publish it.
+
 # Proton VPN CLI
 
 Copyright (c) 2026 Proton AG
@@ -124,4 +129,3 @@ Finally run `scripts/build_packages.py`. This will generate a new package.spec
 file for rpmbuild and a new changelog file for debian.
 
 That's it.
-

@@ -1,0 +1,33 @@
+#!/bin/bash
+# Builds Proton's Rust extension (proton.vpn.platform) for macOS, without the
+# Linux-only parts (protun, the nftables kill switch), into src/proton/vpn.
+# Pass a cargo target (e.g. x86_64-apple-darwin) to cross-build for it.
+set -euo pipefail
+
+root="$(cd "$(dirname "$0")/.." && pwd)"
+src="$root/vendor/python-proton-vpn-api-core"
+target="${1:-}"
+work="$root/build/rs"
+
+# Build from a copy, so that protun, a private Linux-only submodule that cargo
+# resolves even when its feature is off, can be stubbed out.
+mkdir -p "$work/dependencies/protun/src"
+rsync -a --delete --exclude dependencies "$src/Cargo.toml" "$src/Cargo.lock" "$src/src" "$src/.cargo" "$work/"
+cat > "$work/dependencies/protun/Cargo.toml" <<'TOML'
+[package]
+name = "protun"
+version = "0.0.0"
+edition = "2021"
+
+[features]
+unix = []
+TOML
+touch "$work/dependencies/protun/src/lib.rs"
+
+cd "$work"
+RUSTFLAGS="-C link-arg=-undefined -C link-arg=dynamic_lookup" \
+CARGO_TARGET_DIR="$root/build/cargo" \
+    cargo build --release --lib --no-default-features --features python,core,local_agent,telemetry \
+    ${target:+--target "$target"}
+
+cp "$root/build/cargo/${target:+$target/}release/libproton_vpn_platform.dylib" "$root/src/proton/vpn/platform.abi3.so"
