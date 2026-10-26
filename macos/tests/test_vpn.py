@@ -34,6 +34,8 @@ def test_servers_filters_by_mode_and_sorts_by_load(tmp_path, monkeypatch):
         server("CH#4", city="Geneva", load=10),
         server("IS-CH#1", features=vpn.SECURE_CORE_FEATURE),
         server("SE#1", exit_country="SE"),
+        server("CH#5-TOR", features=vpn.TOR_FEATURE | vpn.P2P_FEATURE),
+        server("CH#6-TOR", features=vpn.TOR_FEATURE),
     ]
     path = tmp_path / "serverlist.json"
     path.write_text(json.dumps({"LogicalServers": servers, "MaxTier": 2}))
@@ -46,3 +48,4 @@ def test_servers_filters_by_mode_and_sorts_by_load(tmp_path, monkeypatch):
 
     assert [s["name"] for c in vpn.servers("CH", "p2p") for s in c["servers"]] == ["CH#1"]
     assert [s["name"] for c in vpn.servers("CH", "sc") for s in c["servers"]] == ["IS-CH#1"]
+    assert [s["name"] for c in vpn.servers("CH", ["tor", "p2p"]) for s in c["servers"]] == ["CH#5-TOR"]

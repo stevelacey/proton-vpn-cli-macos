@@ -11,7 +11,7 @@
   vpn account          the signed-in account and plan (--json)
   vpn signout          sign out (sign in with: protonvpn signin <username>)
   vpn city [mode] <city>  connect to the fastest server in a city, e.g. vpn city new york
-  vpn servers [mode] <country>  list a country's servers by city, least loaded first (--json)
+  vpn servers [modes] <country>  list a country's servers by city, least loaded first (--json)
   vpn list [query]     list matching countries (--alfred for Alfred script filter JSON, --json)
   vpn dns <choice>     proton, cloudflare, google, opendns or quad9
   vpn forward          keep the forwarded port alive (the menu bar app runs this)
@@ -122,10 +122,13 @@ def countries():
     found = {}
     for logical in logicals():
         features = logical.get("Features", 0)
-        country = found.setdefault(logical["ExitCountry"], {"servers": 0, "features": set()})
+        country = found.setdefault(logical["ExitCountry"], {"servers": 0, "features": set(), "combos": set()})
         if features & SECURE_CORE_FEATURE:
             country["features"].add("securecore")
             continue
+        # Which features servers have together, so filtering by several finds a server with them all.
+        country["combos"].add(tuple(name for flag, name in (
+            (P2P_FEATURE, "p2p"), (STREAMING_FEATURE, "streaming"), (TOR_FEATURE, "tor")) if features & flag))
         if features & TOR_FEATURE:
             country["features"].add("tor")
             continue
@@ -146,14 +149,16 @@ def countries():
             "servers": country["servers"],
             "aliases": ALIASES.get(code, []),
             "features": sorted(country["features"]),
+            "combos": sorted(list(combo) for combo in country["combos"]),
         }
         for code, country in found.items()
         if country["servers"]
     ]
 
 
-def servers(code, mode=None):
-    """A country's online servers for a mode (sc, p2p, tor or none), by city, least loaded first."""
+def servers(code, modes=()):
+    """A country's online servers for some modes (sc, p2p, tor), by city, least loaded first."""
+    modes = {"sc" if m == "securecore" else m for m in ([modes] if isinstance(modes, str) else modes)}
     try:
         max_tier = json.loads(SERVER_LIST.read_text()).get("MaxTier", 2)
     except (OSError, ValueError):
@@ -163,11 +168,11 @@ def servers(code, mode=None):
         features = logical.get("Features", 0)
         if logical["ExitCountry"] != code or logical.get("Status") != 1 or logical.get("Tier", 0) > max_tier:
             continue
-        if bool(features & SECURE_CORE_FEATURE) != (mode in ("sc", "securecore")):
+        if bool(features & SECURE_CORE_FEATURE) != ("sc" in modes):
             continue
-        if bool(features & TOR_FEATURE) != (mode == "tor"):
+        if bool(features & TOR_FEATURE) != ("tor" in modes):
             continue
-        if mode == "p2p" and not features & P2P_FEATURE:
+        if "p2p" in modes and not features & P2P_FEATURE:
             continue
         cities.setdefault(logical.get("City") or "", []).append({
             "name": logical["Name"],
@@ -634,9 +639,9 @@ def main(argv=None):
             options.append(MODES[args.pop(0)])
         protonvpn("connect", "--city", " ".join(args), *options)
     elif words[0] == "servers" and len(words) >= 2:
-        mode = words[1].lower() if len(words) == 3 else None
+        modes = [w.lower() for w in words[1:-1]]
         found = match(words[-1], countries())
-        cities = servers(found[0]["code"], mode) if found else []
+        cities = servers(found[0]["code"], modes) if found else []
         if "--json" in flags:
             print(json.dumps(cities))
         else:
