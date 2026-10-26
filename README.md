@@ -1,131 +1,87 @@
-> [!NOTE]
-> **This fork adds macOS support.** See [macos/README.md](macos/README.md):
-> `brew install stevelacey/tap/proton-vpn-cli-macos`. Everything else here is Proton's CLI as they
-> publish it.
+# Proton VPN CLI (forked for macOS)
 
-# Proton VPN CLI
+[![PyPI](https://img.shields.io/pypi/v/proton-vpn-cli-macos.svg?style=flat-square)](https://pypi.org/project/proton-vpn-cli-macos/)
+[![CI](https://img.shields.io/github/actions/workflow/status/stevelacey/proton-vpn-cli-macos/ci.yml?branch=main&style=flat-square)](https://github.com/stevelacey/proton-vpn-cli-macos/actions/workflows/ci.yml?query=branch:main)
+[![Coverage](https://img.shields.io/codecov/c/github/stevelacey/proton-vpn-cli-macos?style=flat-square)](https://codecov.io/gh/stevelacey/proton-vpn-cli-macos)
+[![Downloads](https://img.shields.io/pepy/dt/proton-vpn-cli-macos.svg?style=flat-square)](https://pypi.org/project/proton-vpn-cli-macos/)
+[![License](https://img.shields.io/github/license/stevelacey/proton-vpn-cli-macos?style=flat-square)](https://github.com/stevelacey/proton-vpn-cli-macos/blob/main/LICENSE)
 
-Copyright (c) 2026 Proton AG
+A fork of the [Proton VPN CLI](https://github.com/ProtonVPN/proton-vpn-cli) that adds macOS support.
 
-This repository holds the Proton VPN CLI.
-For licensing information see [COPYING](COPYING.md) and [LICENSE](LICENSE).
-For contribution policy see [CONTRIBUTING](CONTRIBUTING.md).
+## Better together
 
-## Description
+- **[Proton VPN Menu Bar](https://github.com/stevelacey/proton-vpn-menubar)**: status, countries and settings in your menu bar
+- **[Alfred Proton VPN](https://github.com/stevelacey/alfred-proton-vpn)**: `vpn swiss` from Alfred
 
-The official Proton VPN CLI for Linux.
+They all drive the same connection: connect from one and the others keep up. Use them instead of
+Proton's Mac app, not alongside it, since it runs its own VPN connection that these can't see or control.
 
-Current functionality:
-- Connect to 19,000+ servers in 139 countries
-- Select servers by country, city, or server ID
-- Secure Core, P2P, and Tor server support
-- Kill switch, NetShield ad-blocker, port forwarding, Custom DNS, IPv6, VPN Accelerator, NAT type
-- WireGuard protocol support
+## Install
 
-Some features and server locations require a paid Proton VPN plan.
-
-Current limitations:
-- Cannot run alongside the Proton VPN GUI app
-- Headless setups are not currently supported 
-- Split tunneling is not yet available
-
-Report issues and request features through [Proton VPN support](https://protonvpn.com/support/contact?subject=%5BCLI%5D&os=Linux&platform=VPN%20for%20Linux).
-
-Have fun on your terminal.
-
-<img src="assets/protonvpn-demo.svg" width="590">
-
-### Cloning
-
-Once you've cloned this repo, run:
-
-> git submodule update --init --recursive
-
-to clone the necessary submodule.
-
-### Installation
-
-You can find the latest release and installation instructions on our [Proton VPN official website](https://protonvpn.com/support/linux-cli).
-
-### Dependencies
-
-For development purposes (within a virtual environment) see the required packages in the setup.py file, under `install_requires` and `extra_require`. As of now these packages will not be available on pypi. Also see [Virtual environment](#virtual-environment) below.
-
-### Virtual environment
-
-If you didn't do it yet, to be able to pip install Proton VPN components you'll
-need to set up our internal Python package registry. You can do so running the
-command below, after replacing `{GITLAB_TOKEN`} with your
-[personal access token](https://docs.gitlab.com/ee/user/profile/personal_access_tokens.html)
-with the scope set to `api`.
-
-```shell
-pip config set global.index-url https://__token__:{GITLAB_TOKEN}@{GITLAB_INSTANCE}/api/v4/groups/{GROUP_ID}/-/packages/pypi/simple
+```sh
+brew install stevelacey/tap/proton-vpn-cli-macos
+vpn setup
+protonvpn signin <username>
 ```
 
-You can create the virtual environment and install the rest of dependencies as
-follows:
+`vpn setup` asks for your password once, so connecting doesn't need it again. Connecting needs root
+for `wg-quick`, `pfctl` and `networksetup`; setup installs a small root-owned helper that only does
+those, and only takes plain WireGuard configs.
 
-```shell
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+Or install it with `uv tool install proton-vpn-cli-macos` (or pipx), plus `brew install wireguard-tools bash`.
+
+## Use
+
+```sh
+vpn                          # status
+vpn swiss                    # fastest server in a country, by name, code or alias
+vpn fastest
+vpn random japan
+vpn sc japan                 # Secure Core; also p2p and tor
+vpn CH#871                   # a specific server
+vpn city new york
+vpn servers ch               # servers by city, least loaded first
+vpn off
+vpn dns cloudflare           # proton, cloudflare, google, opendns or quad9
+vpn set kill-switch standard
+vpn set netshield malware-ads-trackers
+vpn set port-forwarding on
+vpn help
 ```
 
-### CLI misc.
+`protonvpn` has the full set of commands and options:
 
-CLI logs are stored under `~/.cache/Proton/VPN/logs/` directory.
-
-User settings are under `~/.config/Proton/VPN/` directory.
-
-## Folder structure
-
-### Folder "debian"
-
-Contains all debian related data, for easy package compilation.
-
-### Folder "rpmbuild"
-
-Contains all rpm/fedora related data, for easy package compilation.
-
-### Folder "proton/vpn/cli"
-
-This folder contains the CLI source code.
-
-### Folder "tests"
-
-This folder contains unit test code.
-
-You can run the tests with:
-
-```shell
-pytest
+```sh
+protonvpn connect --country CH
+protonvpn connect --city "New York" --p2p
+protonvpn config set netshield malware-ads-trackers
+protonvpn status
+protonvpn --help
 ```
 
+## How it works
 
-## Versioning
-Version matches format: `[major][minor][patch]`
+- Connections are WireGuard, through `wg-quick`, with the local agent confirming each one and
+  applying NetShield, port forwarding and the rest.
+- The kill switch is pf rules in their own anchor; `/etc/pf.conf` is left alone.
+- Sign-in is kept in the macOS Keychain.
+- The release wheel includes the core libraries (`macos/vendor`) and the Rust extension.
 
-We automate the versioning of the debian and rpm files.
-All versions of the application are recorded in versions.yml.
-To bump the version, add the following text to the top of versions.yml
+## Develop
 
+```sh
+git clone --recurse-submodules=macos/vendor git@github.com:stevelacey/proton-vpn-cli-macos.git
+cd proton-vpn-cli-macos/macos
+brew install rust wireguard-tools bash
+scripts/build-platform
+uv sync
+uv run pytest
+uv run vpn setup
 ```
-version: <latest version>
-time: <date> <time>
-author: <your name>
-email: <your email address>
-urgency: low
-stability: unstable
-description:
-- <A description of the changes this new version contains>
----
-```
 
-Make sure you have the '---' dashes at the end of your block of text.
-You can use the previous entries as an example.
+## License
 
-Finally run `scripts/build_packages.py`. This will generate a new package.spec
-file for rpmbuild and a new changelog file for debian.
-
-That's it.
+GPLv3. Copyright (c) 2026 Proton AG; see
+[COPYING](https://github.com/stevelacey/proton-vpn-cli-macos/blob/main/COPYING.md),
+[LICENSE](https://github.com/stevelacey/proton-vpn-cli-macos/blob/main/LICENSE) and the
+[contribution policy](https://github.com/stevelacey/proton-vpn-cli-macos/blob/main/CONTRIBUTING.md).

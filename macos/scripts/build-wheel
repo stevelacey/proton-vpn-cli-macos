@@ -140,7 +140,7 @@ def main():
     shutil.copy(so, STAGE / "proton" / "vpn" / "platform.abi3.so")
     (STAGE / "proton" / "vpn" / "macos" / "bundled.json").write_text(
         json.dumps({name: importlib.metadata.version(name) for name in BUNDLED}))
-    shutil.copy(MACOS / "README.md", STAGE / "README.md")
+    shutil.copy(ROOT / "README.md", STAGE / "README.md")
     shutil.copy(ROOT / "LICENSE", STAGE / "LICENSE")
     (STAGE / "pyproject.toml").write_text(pyproject(version))
 

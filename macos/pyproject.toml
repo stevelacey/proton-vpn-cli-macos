@@ -1,8 +1,7 @@
 [project]
 name = "proton-vpn-cli-macos"
 version = "0.1.0"
-description = "Proton VPN's official CLI on macOS: a WireGuard backend, pf kill switch and Keychain sign-in for Proton's own code"
-readme = "README.md"
+description = "Proton VPN CLI, forked for macOS: a WireGuard backend, pf kill switch and Keychain sign-in"
 license = "GPL-3.0-or-later"
 requires-python = ">=3.12"
 dependencies = [
