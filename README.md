@@ -19,7 +19,7 @@ Proton's Mac app, not alongside it, since it runs its own VPN connection that th
 ## Install
 
 ```sh
-brew install stevelacey/tap/proton-vpn-cli-macos
+brew install stevelacey/tap/proton-vpn-cli
 vpn setup
 protonvpn signin <username>
 ```
