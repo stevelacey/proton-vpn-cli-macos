@@ -538,7 +538,8 @@ def alfred(items, query):
                         "autocomplete": "sc "})
     elif not query:
         results.append({"title": f"Fastest server ({note})", "arg": prefix, "autocomplete": prefix + " "})
-    for c in match(query, items) if query else []:
+    # A mode on its own also lists its countries, to pick one.
+    for c in match(query, items) if query or modes else []:
         results.append({
             "uid": f"{prefix} {c['code']}".strip(),
             "title": c["name"] + (f" ({note})" if note else ""),

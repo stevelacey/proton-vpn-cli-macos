@@ -186,8 +186,10 @@ def test_alfred_lists_matching_countries_after_commands(server_list, capsys):
 
 
 def test_alfred_modes_carry_through_and_filter_countries(server_list, capsys):
+    # A mode on its own offers its fastest server, then the countries that have it.
     items = alfred(capsys, "p2p")
-    assert items == [{"title": "Fastest server (P2P)", "arg": "p2p", "autocomplete": "p2p "}]
+    assert items[0] == {"title": "Fastest server (P2P)", "arg": "p2p", "autocomplete": "p2p "}
+    assert [(i["title"], i["arg"]) for i in items[1:]] == [("Switzerland (P2P)", "p2p CH")]
 
     items = alfred(capsys, "p2p swiss")
     assert [(i["title"], i["arg"]) for i in items] == [("Switzerland (P2P)", "p2p CH")]
