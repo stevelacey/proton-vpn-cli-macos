@@ -403,3 +403,10 @@ def test_signin_from_stdin_without_output(monkeypatch, capsys):
 def test_country_codes_loads_proton_module():
     names = vpn._country_codes()
     assert names.get_country_name_by_code("CH") == "Switzerland"
+
+
+def test_main_splits_alfreds_single_argument(monkeypatch):
+    chosen = []
+    monkeypatch.setattr(vpn, "set_dns", chosen.append)
+    vpn.main(["dns cloudflare"])
+    assert chosen == ["cloudflare"]

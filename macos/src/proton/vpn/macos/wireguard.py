@@ -94,8 +94,8 @@ async def reset_leftover_dns():
     process = await asyncio.create_subprocess_exec(
         "/usr/sbin/networksetup", "-listallnetworkservices", stdout=asyncio.subprocess.PIPE)
     output, _ = await process.communicate()
-    for service in output.decode().splitlines()[1:]:
-        service = service.lstrip("*")
+
+    async def reset(service):
         process = await asyncio.create_subprocess_exec(
             "/usr/sbin/networksetup", "-getdnsservers", service, stdout=asyncio.subprocess.PIPE)
         servers, _ = await process.communicate()
@@ -103,6 +103,9 @@ async def reset_leftover_dns():
             logger.warning("Resetting DNS left over from the tunnel on %s", service)
             process = await asyncio.create_subprocess_exec(*privileged.command("dns-reset", service))
             await process.wait()
+
+    # All at once: one at a time, they slow disconnecting down.
+    await asyncio.gather(*(reset(service.lstrip("*")) for service in output.decode().splitlines()[1:]))
 
 
 class WgQuickWireguard(VPNConnection, LocalAgentMixin):

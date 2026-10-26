@@ -595,6 +595,9 @@ def icon(code):
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
+    if len(argv) == 1 and " " in argv[0].strip():
+        # Alfred passes everything as one argument, e.g. "dns cloudflare".
+        argv = argv[0].split()
     flags = [a for a in argv if a.startswith("--")]
     words = [a for a in argv if not a.startswith("--")]
 
