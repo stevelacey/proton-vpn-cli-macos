@@ -1,7 +1,7 @@
 > [!NOTE]
 > **This fork adds macOS support.** See [macos/README.md](macos/README.md):
-> `brew install stevelacey/tap/proton-vpn-cli-macos`. Unofficial, not made or endorsed by Proton AG;
-> everything else here is Proton's CLI as they publish it.
+> `brew install stevelacey/tap/proton-vpn-cli-macos`. Everything else here is Proton's CLI as they
+> publish it.
 
 # Proton VPN CLI
 

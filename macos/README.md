@@ -12,8 +12,6 @@ code is used as is; this adds the macOS parts it's missing:
 It works with the [menu bar app](https://github.com/stevelacey/proton-vpn-menubar) and the
 [Alfred workflow](https://github.com/stevelacey/alfred-proton-vpn).
 
-Unofficial: not made or endorsed by Proton AG.
-
 ## Install
 
 ```sh

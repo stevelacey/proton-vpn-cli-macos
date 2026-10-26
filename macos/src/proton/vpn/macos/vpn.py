@@ -345,7 +345,8 @@ def account():
     api = ProtonVPNAPI(ClientTypeMetadata(type="cli"))
     if not api.is_user_logged_in():
         return None
-    return {"username": api.account_name, "plan": api.account_data.plan_title}
+    # Tier 0 is Proton Free, which can only connect to the fastest free server.
+    return {"username": api.account_name, "plan": api.account_data.plan_title, "tier": api.account_data.max_tier}
 
 
 def signin_from_stdin():
