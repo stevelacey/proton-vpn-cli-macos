@@ -188,7 +188,8 @@ def test_alfred_lists_matching_countries_after_commands(server_list, capsys):
 def test_alfred_modes_carry_through_and_filter_countries(server_list, capsys):
     # A mode on its own offers its fastest server, then the countries that have it.
     items = alfred(capsys, "p2p")
-    assert items[0] == {"title": "Fastest server (P2P)", "arg": "p2p", "autocomplete": "p2p "}
+    assert items[0] == {"title": "Fastest server (P2P)", "arg": "p2p", "autocomplete": "p2p ",
+                        "variables": {"notice": "Connecting to the fastest server (P2P)…"}}
     assert [(i["title"], i["arg"]) for i in items[1:]] == [("Switzerland (P2P)", "p2p CH")]
 
     items = alfred(capsys, "p2p swiss")
@@ -204,3 +205,9 @@ def test_alfred_modes_carry_through_and_filter_countries(server_list, capsys):
 def test_main_status_json(files, capsys, argv, expected):
     vpn.main(argv)
     assert json.loads(capsys.readouterr().out) == expected
+
+
+def test_alfred_results_say_what_they_do_straight_away(server_list, capsys):
+    notices = {i["title"]: i["variables"]["notice"] for i in alfred(capsys, "kill")}
+    assert notices["Turn kill switch on"] == "Turning kill switch on…"
+    assert alfred(capsys, "swiss")[0]["variables"] == {"notice": "Connecting to Switzerland…"}

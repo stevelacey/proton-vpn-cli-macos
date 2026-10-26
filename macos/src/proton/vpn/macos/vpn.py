@@ -354,6 +354,17 @@ def account():
     return {"username": api.account_name, "plan": api.account_data.plan_title, "tier": api.account_data.max_tier}
 
 
+def signin_in_terminal():
+    """Opens Terminal to sign in, for Alfred, which shouldn't see a password."""
+    import shlex  # pylint: disable=import-outside-toplevel
+    import shutil  # pylint: disable=import-outside-toplevel
+    import subprocess  # pylint: disable=import-outside-toplevel
+    protonvpn = shutil.which("protonvpn") or str(Path(sys.argv[0]).with_name("protonvpn"))
+    command = f'read -p "Proton username: " username && {shlex.quote(protonvpn)} signin "$username"'
+    script = f'tell application "Terminal" to do script {json.dumps(command)}'
+    subprocess.run(["/usr/bin/osascript", "-e", script, "-e", 'tell application "Terminal" to activate'], check=False)
+
+
 def signin_from_stdin():
     """
     Signs in with Proton's own signin command, answering its prompts from lines on stdin,
@@ -537,7 +548,8 @@ def alfred(items, query):
         results.append({"title": "Secure Core", "subtitle": "Fastest Secure Core server; add a country", "arg": "sc",
                         "autocomplete": "sc "})
     elif not query:
-        results.append({"title": f"Fastest server ({note})", "arg": prefix, "autocomplete": prefix + " "})
+        results.append({"title": f"Fastest server ({note})", "arg": prefix, "autocomplete": prefix + " ",
+                        "variables": {"notice": f"Connecting to the fastest server ({note})…"}})
     # A mode on its own also lists its countries, to pick one.
     for c in match(query, items) if query or modes else []:
         results.append({
@@ -547,6 +559,7 @@ def alfred(items, query):
             "arg": f"{prefix} {c['code']}".strip(),
             "autocomplete": f"{prefix} {c['name']}".strip(),
             "icon": icon(c["code"]),
+            "variables": {"notice": f"Connecting to {c['name']}" + (f" ({note})" if note else "") + "…"},
         })
     results += weak
     print(json.dumps({"items": results}))
@@ -558,6 +571,8 @@ def commands(query, current):
     if current["state"] != "Disconnected":
         candidates.append(("Disconnect", describe(current), "off", ["off", "disconnect", "stop"]))
     candidates += [
+        ("Sign in…", "Opens Terminal to sign in to your Proton account", "signin", ["sign in", "signin", "login", "account"]),
+        ("Sign out", "Disconnects and forgets your Proton sign-in", "signout", ["sign out", "signout", "logout"]),
         ("Fastest server", "Quick Connect", "fastest", ["fastest", "quick", "connect"]),
         ("Random server", "Anywhere", "random", ["random"]),
         ("Secure Core", "Fastest Secure Core server; add a country", "sc", ["sc", "secure core"]),
@@ -579,12 +594,27 @@ def commands(query, current):
     strong, weak = [], []
     for title, subtitle, arg, keywords in candidates:
         result = {"title": title, "subtitle": subtitle, "arg": arg,
-                  "autocomplete": arg + " " if arg in MODES else arg}
+                  "autocomplete": arg + " " if arg in MODES else arg,
+                  "variables": {"notice": notice(title)}}
         if any(k.startswith(q) for k in [title.lower(), *keywords]):
             strong.append(result)
         elif any(w.startswith(q) for k in [title.lower(), *keywords] for w in k.split()):
             weak.append(result)
     return strong, weak
+
+
+def notice(title):
+    """What the Alfred workflow says as soon as a result is chosen, before the command finishes."""
+    title = title.removesuffix(" (in use)").removesuffix("…")
+    if title.startswith("Turn "):
+        return f"Turning {title.removeprefix('Turn ')}…"
+    if title.startswith("Use "):
+        return f"Switching to {title.removeprefix('Use ')}…"
+    if title in ("Disconnect", "Sign out"):
+        return {"Disconnect": "Disconnecting…", "Sign out": "Signing out…"}[title]
+    if title == "Sign in":
+        return "Opening Terminal to sign in…"
+    return f"Connecting to the {title.lower()}…" if title.endswith("server") else f"Connecting to {title}…"
 
 
 def icon(code):
@@ -619,6 +649,8 @@ def main(argv=None):
         privileged.setup(user)
     elif words[0] in ("signin", "login") and "--stdin" in flags:
         signin_from_stdin()
+    elif words[0] in ("signin", "login"):
+        signin_in_terminal()
     elif words[0] == "account":
         current = account()
         if "--json" in flags:
