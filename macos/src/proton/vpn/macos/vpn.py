@@ -455,6 +455,9 @@ def forward():
     """
     path = forwarded_port_path()
     while status()["state"] == "Connected" and settings()["port_forwarding"]:
+        # Renews well inside the minute; tries again soon if the server isn't handing out ports
+        # yet, e.g. just after port forwarding is turned on.
+        wait = 45
         try:
             port = nat_pmp_map("udp")
             nat_pmp_map("tcp")
@@ -464,7 +467,8 @@ def forward():
                 print(f"Forwarded port {port}", flush=True)
         except OSError as exc:
             print(f"vpn: couldn't renew the forwarded port: {exc}", file=sys.stderr, flush=True)
-        time.sleep(45)
+            wait = 2
+        time.sleep(wait)
 
 
 def describe(s):

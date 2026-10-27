@@ -334,6 +334,7 @@ def test_forward_writes_the_port_and_keeps_renewing(files, monkeypatch, tmp_path
         vpn.forward()
     assert (tmp_path / "forwarded_port").read_text() == "4242"
     assert capsys.readouterr().out == "Forwarded port 4242\n"
+    assert sleeps == [45, 45]
 
 
 def test_forward_reports_errors_and_stops_when_disconnected(files, monkeypatch, capsys):
@@ -345,9 +346,11 @@ def test_forward_reports_errors_and_stops_when_disconnected(files, monkeypatch, 
         raise OSError("timed out")
 
     monkeypatch.setattr(vpn, "nat_pmp_map", refuse)
-    monkeypatch.setattr(vpn.time, "sleep", lambda _seconds: None)
+    sleeps = []
+    monkeypatch.setattr(vpn.time, "sleep", sleeps.append)
     vpn.forward()
     assert "couldn't renew the forwarded port: timed out" in capsys.readouterr().err
+    assert sleeps == [2]
 
 
 def test_forwarded_port_path_is_under_the_temp_dir(monkeypatch, tmp_path):
