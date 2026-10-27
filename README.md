@@ -43,7 +43,7 @@ protonvpn servers ch               # servers by city, least loaded first
 protonvpn dns cloudflare           # proton, cloudflare, google, opendns or quad9
 protonvpn set kill-switch standard
 protonvpn set netshield malware-ads-trackers
-protonvpn set port-forwarding on
+protonvpn set port-forwarding on   # prints the forwarded port
 protonvpn off
 protonvpn help
 ```
@@ -62,6 +62,9 @@ protonvpn connect --help
 - Connections are WireGuard, through `wg-quick`, with the local agent confirming each one and
   applying NetShield, port forwarding and the rest.
 - The kill switch is pf rules in their own anchor; `/etc/pf.conf` is left alone.
+- Proton's server only forwards a port for a minute at a time, so with port forwarding on, a LaunchAgent
+  runs `protonvpn forward` in the background to keep renewing it. It's added the first time you use
+  port forwarding, and stops by itself when you disconnect or turn it off.
 - Sign-in is kept in the macOS Keychain.
 - The release wheel includes the core libraries (`macos/vendor`) and the Rust extension.
 

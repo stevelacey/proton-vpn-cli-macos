@@ -17,6 +17,22 @@ def no_real_commands(monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", refuse)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", refuse)
+
+
+KEEP_PORT_FORWARDED = vpn.keep_port_forwarded
+
+
+@pytest.fixture(autouse=True)
+def no_forwarding(monkeypatch):
+    """Commands that connect or change settings don't start forwarding unless a test asks; see forwarder."""
+    monkeypatch.setattr(vpn, "keep_port_forwarded", lambda: None)
+
+
+@pytest.fixture
+def forwarder(monkeypatch):
+    """The real keep_port_forwarded."""
+    monkeypatch.setattr(vpn, "keep_port_forwarded", KEEP_PORT_FORWARDED)
+    return KEEP_PORT_FORWARDED
     monkeypatch.setattr("os.execv", refuse)
 
 

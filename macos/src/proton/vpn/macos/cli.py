@@ -93,11 +93,47 @@ def _add_adult_content_netshield():
     command.epilog = commands._format_setting_epilog(definitions.NETSHIELD_FEATURE)  # pylint: disable=protected-access
 
 
+PORT_FORWARDING_HOW_IT_WORKS = """How It Works:
+  On P2P servers, the server forwards a port to you while connected.
+  protonvpn keeps it in the background, and 'protonvpn status' shows it."""
+
+
+def _explain_port_forwarding():
+    """
+    Proton's CLI says to keep the forwarded port with a natpmpc script from its Linux guide;
+    here `protonvpn forward` keeps it in the background, so its messages point to status instead.
+    """
+    # pylint: disable=import-outside-toplevel,protected-access
+    import click
+    from proton.vpn.cli.commands import feature_setting_definitions as definitions, server, settings
+    from proton.vpn.session.servers.types import ServerFeatureEnum
+    show_capabilities = server._display_relevant_server_capabilities
+
+    async def display_relevant_server_capabilities(controller, logical):
+        current = await controller.get_settings()
+        if current.features.port_forwarding and ServerFeatureEnum.P2P in logical.features:
+            click.echo("\nPort forwarding is active on this server: run 'protonvpn status' for the port.")
+        else:
+            await show_capabilities(controller, logical)
+
+    server._display_relevant_server_capabilities = display_relevant_server_capabilities
+    settings._feature_specific_success_postfix = lambda feature, value: ""
+
+    feature = definitions.PORT_FORWARDING_FEATURE
+    epilog = feature.help_epilog
+    if "How It Works" in epilog:
+        start = epilog.index("How It Works")
+        end = epilog.index("\b\nExamples:")
+        feature.help_epilog = epilog[:start] + PORT_FORWARDING_HOW_IT_WORKS + "\n" + epilog[end:]
+    settings.set_group.commands[feature.command].epilog = settings._format_setting_epilog(feature)
+
+
 def install():
     """Plugs the macOS backends into Proton's api-core."""
     ProtonVPNAPI.create_registry = staticmethod(create_registry)
     _wait_for_current_tasks_ignoring_cancelled()
     _add_adult_content_netshield()
+    _explain_port_forwarding()
 
     # Setting these up front stops the loader from importing the Linux
     # implementations that api-core declares as entry points.
@@ -144,6 +180,9 @@ def main():
     with contextlib.nullcontext() if command in READ_ONLY_COMMANDS else locked():
         # Skips the check for Proton's Linux GUI over D-Bus.
         cli_main(allow_concurrency=True)
+    if command in ("connect", "config"):
+        from proton.vpn.macos import vpn  # pylint: disable=import-outside-toplevel
+        vpn.keep_port_forwarded()
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -21,7 +21,8 @@ def test_status_connected(server_list, monkeypatch):
     (server_list / "connection" / "exit_ip").write_text("1.2.3.4\n")
     monkeypatch.setattr(vpn, "tunnel_device", lambda: "utun4")
     assert vpn.status() == {"state": "Connected", "server": "CH#1", "entry_ip": "185.1.2.3", "interface": "utun4",
-                            "code": "CH", "country": "Switzerland", "city": "Zurich", "load": 10, "ip": "1.2.3.4"}
+                            "code": "CH", "country": "Switzerland", "city": "Zurich", "load": 10, "p2p": False,
+                            "ip": "1.2.3.4"}
 
 
 def test_status_dropped_when_the_tunnel_is_gone(server_list):
@@ -56,7 +57,7 @@ def test_status_connecting_says_where(server_list):
     persist(server_list, connection_id="old")
     (server_list / "connection" / "proton.conf").write_text("# Connection new\n# Server SE#1\n[Interface]\n")
     assert vpn.status() == {"state": "Connecting", "server": "SE#1", "code": "SE", "country": "Sweden",
-                            "city": "Stockholm", "load": 10}
+                            "city": "Stockholm", "load": 10, "p2p": False}
 
 
 def test_status_not_connecting_when_the_config_is_old_or_matches(files):

@@ -93,9 +93,11 @@ def proton_main(home, monkeypatch):
 
 
 def test_main_locks_commands_that_change_things(proton_main, monkeypatch):
+    from proton.vpn.macos import vpn
+    monkeypatch.setattr(vpn, "keep_port_forwarded", lambda: proton_main.append("forward"))
     monkeypatch.setattr(sys, "argv", ["protonvpn", "connect", "--p2p"])
     cli.main()
-    assert proton_main == ["install", "locked", {"allow_concurrency": True}]
+    assert proton_main == ["install", "locked", {"allow_concurrency": True}, "forward"]
 
 
 def test_main_does_not_lock_read_only_commands(proton_main, monkeypatch):
@@ -116,3 +118,46 @@ def test_main_shows_connects_help_before_setup(proton_main, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["protonvpn", "connect", "--help"])
     cli.main()
     assert proton_main[-1] == {"allow_concurrency": True}
+
+
+@pytest.mark.parametrize("port_forwarding, features, expected", [
+    (True, ["P2P"], "Port forwarding is active on this server: run 'protonvpn status' for the port.\n"),
+    (True, [], "Proton's note\n"),
+    (False, ["P2P"], "Proton's note\n"),
+])
+def test_connect_points_to_status_for_the_forwarded_port(monkeypatch, capsys, port_forwarding, features, expected):
+    import asyncio
+    import types
+    from proton.vpn.cli.commands import server
+    from proton.vpn.session.servers.types import ServerFeatureEnum
+
+    async def protons(controller, logical):
+        print("Proton's note")
+
+    monkeypatch.setattr(server, "_display_relevant_server_capabilities", protons)
+    cli._explain_port_forwarding()
+
+    async def get_settings():
+        return types.SimpleNamespace(features=types.SimpleNamespace(port_forwarding=port_forwarding))
+
+    controller = types.SimpleNamespace(get_settings=get_settings)
+    logical = types.SimpleNamespace(features=[getattr(ServerFeatureEnum, f) for f in features])
+    asyncio.run(server._display_relevant_server_capabilities(controller, logical))
+    assert capsys.readouterr().out.strip() == expected.strip()
+
+
+def test_port_forwarding_messages_point_to_status_not_protons_linux_guide(monkeypatch):
+    from proton.vpn.cli.commands import feature_setting_definitions as definitions, settings
+    feature = definitions.PORT_FORWARDING_FEATURE
+    monkeypatch.setattr(feature, "help_epilog", feature.help_epilog)
+    monkeypatch.setattr(settings, "_feature_specific_success_postfix", settings._feature_specific_success_postfix)
+    command = settings.set_group.commands[feature.command]
+    monkeypatch.setattr(command, "epilog", command.epilog)
+    cli._explain_port_forwarding()
+    assert settings._feature_specific_success_postfix(feature, "enabled") == ""
+    assert "natpmpc" not in command.epilog and "#linux" not in command.epilog
+    assert "'protonvpn status' shows it" in command.epilog
+    assert "Examples:" in command.epilog
+    # Once is enough.
+    cli._explain_port_forwarding()
+    assert command.epilog.count("How It Works") == 1

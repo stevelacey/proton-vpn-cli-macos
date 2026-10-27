@@ -16,7 +16,7 @@
   protonvpn set <setting> <value>  change a setting, e.g. protonvpn set netshield malware-only
   protonvpn account            the signed-in account and plan (--json)
   protonvpn signin <username>  sign in; protonvpn signout signs out
-  protonvpn forward            keep the forwarded port alive (the menu bar app runs this)
+  protonvpn forward            keep the forwarded port alive (started for you, in the background)
 
 Proton's own commands work too: connect, disconnect, status, servers, countries, cities, config,
 signin, signout and info (protonvpn <command> --help). Status and the country list are read from
@@ -32,6 +32,9 @@ import unicodedata
 from pathlib import Path
 
 from proton.vpn.macos.tunnel import tunnel_device
+
+# This command, for launchd to run it in the background; Proton's CLI renames it in sys.argv.
+COMMAND = os.path.abspath(sys.argv[0])
 
 CACHE = Path.home() / ".cache" / "Proton" / "VPN"
 SERVER_LIST = CACHE / "serverlist.json"
@@ -222,6 +225,7 @@ def locate(result):
             result["city"] = logical.get("City")
             if "Load" in logical:
                 result["load"] = logical["Load"]
+            result["p2p"] = bool(logical.get("Features", 0) & P2P_FEATURE)
             break
     return result
 
@@ -339,6 +343,8 @@ def set_setting(name, value):
         current = status()
         if name != "kill-switch" or current["state"] != "Connected":
             protonvpn("config", "set", name, value)
+            if name == "port-forwarding" and value == "on":
+                report_forwarded_port()
             return
 
         run_protonvpn("disconnect")
@@ -446,16 +452,21 @@ def nat_pmp_map(protocol, lifetime=60):
     return external
 
 
+def forwarding(current):
+    """Whether a connection should have a forwarded port: port forwarding's on, and it's a P2P server."""
+    return current["state"] == "Connected" and current.get("p2p", True) and settings()["port_forwarding"]
+
+
 def forward():
     """
     Keeps the forwarded port alive while connected with port forwarding on.
 
     Proton's server hands out the port for 60 seconds at a time; its CLI only
-    renews it while it's running, i.e. while connecting. The menu bar app runs
-    this alongside a connection.
+    renews it while it's running, i.e. while connecting. keep_port_forwarded
+    has launchd run this in the background.
     """
     path = forwarded_port_path()
-    while status()["state"] == "Connected" and settings()["port_forwarding"]:
+    while forwarding(status()):
         # Renews well inside the minute; tries again soon if the server isn't handing out ports
         # yet, e.g. just after port forwarding is turned on.
         wait = 45
@@ -466,10 +477,68 @@ def forward():
             if not path.exists() or path.read_text().strip() != str(port):
                 path.write_text(str(port))
                 print(f"Forwarded port {port}", flush=True)
+            else:
+                # Shows it's being renewed, for status to restart it when it isn't.
+                os.utime(path)
         except OSError as exc:
             print(f"protonvpn: couldn't renew the forwarded port: {exc}", file=sys.stderr, flush=True)
             wait = 2
         time.sleep(wait)
+    # Disconnected or turned off, so the port's no longer forwarded.
+    path.unlink(missing_ok=True)
+
+
+FORWARDER = "com.steve.protonvpn.forward"
+
+
+def keep_port_forwarded():
+    """
+    Has launchd run `protonvpn forward` in the background while connected with port forwarding
+    on, from a LaunchAgent added the first time it's needed. It stops by itself when it's done.
+    """
+    if not forwarding(status()):
+        return
+    import plistlib  # pylint: disable=import-outside-toplevel
+    import subprocess  # pylint: disable=import-outside-toplevel
+    agent = Path.home() / "Library" / "LaunchAgents" / f"{FORWARDER}.plist"
+    domain = f"gui/{os.getuid()}"
+    try:
+        program = plistlib.loads(agent.read_bytes())["ProgramArguments"][0]
+    except (OSError, ValueError, KeyError, IndexError):
+        program = None
+    if not program or not os.path.exists(program):
+        command = [COMMAND] if os.path.basename(COMMAND) == "protonvpn" \
+            else [sys.executable, "-m", "proton.vpn.macos.vpn"]
+        subprocess.run(["/bin/launchctl", "bootout", f"{domain}/{FORWARDER}"], capture_output=True, check=False)
+        agent.parent.mkdir(parents=True, exist_ok=True)
+        agent.write_bytes(plistlib.dumps({"Label": FORWARDER, "ProgramArguments": [*command, "forward"]}))
+    # Loading it again, or starting it while it runs, does nothing.
+    subprocess.run(["/bin/launchctl", "bootstrap", domain, str(agent)], capture_output=True, check=False)
+    subprocess.run(["/bin/launchctl", "kickstart", f"{domain}/{FORWARDER}"], capture_output=True, check=False)
+
+
+def report_forwarded_port(timeout=30):
+    """Waits for the forwarded port, which takes a few seconds, and says what it is."""
+    if not forwarding(status()):
+        return
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            print(f"Forwarded port {int(forwarded_port_path().read_text())}")
+            return
+        except (OSError, ValueError):
+            time.sleep(0.5)
+    print("protonvpn: no forwarded port yet; protonvpn status shows it when there is one")
+
+
+def renew_stalled_forwarding(current):
+    """Restarts forwarding when the port hasn't been renewed in over a minute, say after a crash."""
+    try:
+        stalled = time.time() - forwarded_port_path().stat().st_mtime > 90
+    except OSError:
+        stalled = True
+    if stalled and forwarding(current):
+        keep_port_forwarded()
 
 
 def describe(s):
@@ -499,6 +568,8 @@ def protonvpn(*args):
     from proton.vpn.cli import main as cli_main  # pylint: disable=import-outside-toplevel
     with cli.locked():
         cli_main(allow_concurrency=True, cli_args=list(args))
+    if args and args[0] in ("connect", "config"):
+        keep_port_forwarded()
 
 
 def connect(args):
@@ -676,6 +747,7 @@ def main(argv=None):
     elif not words or words[0] == "status":
         current = status()
         print(json.dumps(current) if "--json" in flags else describe(current))
+        renew_stalled_forwarding(current)
     elif words[0] in ("off", "disconnect", "down"):
         if status()["state"] == "Disconnected":
             print("Already disconnected")
