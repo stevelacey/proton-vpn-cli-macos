@@ -212,6 +212,19 @@ def match(query, items):
     return [c for _, _, c in sorted(ranked, key=lambda r: (r[0], r[1]))]
 
 
+def locate(result):
+    """Adds the server's country, city and load, from the server list."""
+    for logical in logicals():
+        if logical.get("Name") == result["server"]:
+            result["code"] = logical["ExitCountry"]
+            result["country"] = country_name(logical["ExitCountry"])
+            result["city"] = logical.get("City")
+            if "Load" in logical:
+                result["load"] = logical["Load"]
+            break
+    return result
+
+
 def status():
     """The current connection, from the files Proton's CLI and wg-quick leave behind."""
     try:
@@ -231,7 +244,7 @@ def status():
     except (OSError, IndexError):
         connecting = False
     if connecting:
-        return {"state": "Connecting", "server": header[1].removeprefix("# Server ")}
+        return locate({"state": "Connecting", "server": header[1].removeprefix("# Server ")})
 
     if not server:
         return {"state": "Disconnected"}
@@ -245,14 +258,7 @@ def status():
     if device:
         # For live speeds, from the interface's byte counters.
         result["interface"] = device
-    for logical in logicals():
-        if logical.get("Name") == result["server"]:
-            result["code"] = logical["ExitCountry"]
-            result["country"] = country_name(logical["ExitCountry"])
-            result["city"] = logical.get("City")
-            if "Load" in logical:
-                result["load"] = logical["Load"]
-            break
+    locate(result)
     try:
         result["ip"] = EXIT_IP.read_text().strip()
     except OSError:

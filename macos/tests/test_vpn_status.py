@@ -52,6 +52,13 @@ def test_status_connecting_when_a_fresh_config_is_for_another_connection(files):
     assert vpn.status() == {"state": "Connecting", "server": "CH#9"}
 
 
+def test_status_connecting_says_where(server_list):
+    persist(server_list, connection_id="old")
+    (server_list / "connection" / "proton.conf").write_text("# Connection new\n# Server SE#1\n[Interface]\n")
+    assert vpn.status() == {"state": "Connecting", "server": "SE#1", "code": "SE", "country": "Sweden",
+                            "city": "Stockholm", "load": 10}
+
+
 def test_status_not_connecting_when_the_config_is_old_or_matches(files):
     persist(files, connection_id="old")
     config = files / "connection" / "proton.conf"
