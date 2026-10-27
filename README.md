@@ -1,4 +1,4 @@
-# Proton VPN CLI (forked for macOS)
+# Proton VPN CLI for macOS
 
 [![PyPI](https://img.shields.io/pypi/v/proton-vpn-cli-macos.svg?style=flat-square)](https://pypi.org/project/proton-vpn-cli-macos/)
 [![CI](https://img.shields.io/github/actions/workflow/status/stevelacey/proton-vpn-cli-macos/ci.yml?branch=main&style=flat-square)](https://github.com/stevelacey/proton-vpn-cli-macos/actions/workflows/ci.yml?query=branch:main)
