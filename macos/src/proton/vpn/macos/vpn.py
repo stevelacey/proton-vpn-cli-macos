@@ -611,7 +611,8 @@ def commands(query, current):
     strong, weak = [], []
     for title, subtitle, arg, keywords in candidates:
         result = {"title": title, "subtitle": subtitle, "arg": arg,
-                  "autocomplete": arg + " " if arg in MODES else arg,
+                  # What you'd type, e.g. "sign in" rather than "signin --terminal".
+                  "autocomplete": arg + " " if arg in MODES else keywords[0] if "--" in arg or arg.startswith("set ") else arg,
                   "variables": {"notice": notice(title)}}
         if any(k.startswith(q) for k in [title.lower(), *keywords]):
             strong.append(result)
