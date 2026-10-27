@@ -64,10 +64,40 @@ def _wait_for_current_tasks_ignoring_cancelled():
     server.wait_for_current_tasks = wait_for_current_tasks
 
 
+NETSHIELD_LEVELS = {0: "off", 1: "malware-only", 2: "malware-ads-trackers", 3: "malware-ads-trackers-adult"}
+
+
+def _add_adult_content_netshield():
+    """
+    Adds NetShield's level 3, which also blocks adult content. Proton's apps offer it and its
+    servers apply it, but the Linux CLI only lists levels 0 to 2.
+    """
+    # pylint: disable=import-outside-toplevel
+    from proton.vpn.cli.commands import feature_setting_definitions as definitions
+    netshield = definitions.NetshieldType
+    describe = netshield.get_human_friendly_state_string
+    netshield.to_list_of_str = staticmethod(lambda: list(NETSHIELD_LEVELS.values()))
+    netshield.from_str = staticmethod(lambda value: {v: k for k, v in NETSHIELD_LEVELS.items()}.get(value, 2))
+    netshield.to_str = staticmethod(lambda value: NETSHIELD_LEVELS.get(int(value), "malware-ads-trackers"))
+    netshield.get_human_friendly_state_string = staticmethod(
+        lambda value: "malware, ads, trackers and adult content" if int(value) == 3 else describe(value))
+    definitions.NETSHIELD_FEATURE.value_to_help["malware-ads-trackers-adult"] = \
+        "Block malware, ads, trackers and adult content"
+
+    # The command's choices and help were built when it was defined, so they're updated too.
+    from proton.vpn.cli.commands import settings as commands  # pylint: disable=import-outside-toplevel
+    command = commands.netshield_command
+    for param in command.params:
+        if hasattr(param.type, "choices"):
+            param.type.choices = list(NETSHIELD_LEVELS.values())
+    command.epilog = commands._format_setting_epilog(definitions.NETSHIELD_FEATURE)  # pylint: disable=protected-access
+
+
 def install():
     """Plugs the macOS backends into Proton's api-core."""
     ProtonVPNAPI.create_registry = staticmethod(create_registry)
     _wait_for_current_tasks_ignoring_cancelled()
+    _add_adult_content_netshield()
 
     # Setting these up front stops the loader from importing the Linux
     # implementations that api-core declares as entry points.
