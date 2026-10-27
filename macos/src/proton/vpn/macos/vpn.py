@@ -236,16 +236,22 @@ def status():
     if not server:
         return {"state": "Disconnected"}
 
+    device = tunnel_device()
     result = {
-        "state": "Connected" if tunnel_device() else "Dropped",
+        "state": "Connected" if device else "Dropped",
         "server": server.get("server_name"),
         "entry_ip": server.get("server_ip"),
     }
+    if device:
+        # For live speeds, from the interface's byte counters.
+        result["interface"] = device
     for logical in logicals():
         if logical.get("Name") == result["server"]:
             result["code"] = logical["ExitCountry"]
             result["country"] = country_name(logical["ExitCountry"])
             result["city"] = logical.get("City")
+            if "Load" in logical:
+                result["load"] = logical["Load"]
             break
     try:
         result["ip"] = EXIT_IP.read_text().strip()

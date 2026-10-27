@@ -20,8 +20,8 @@ def test_status_connected(server_list, monkeypatch):
     persist(server_list)
     (server_list / "connection" / "exit_ip").write_text("1.2.3.4\n")
     monkeypatch.setattr(vpn, "tunnel_device", lambda: "utun4")
-    assert vpn.status() == {"state": "Connected", "server": "CH#1", "entry_ip": "185.1.2.3", "code": "CH",
-                            "country": "Switzerland", "city": "Zurich", "ip": "1.2.3.4"}
+    assert vpn.status() == {"state": "Connected", "server": "CH#1", "entry_ip": "185.1.2.3", "interface": "utun4",
+                            "code": "CH", "country": "Switzerland", "city": "Zurich", "load": 10, "ip": "1.2.3.4"}
 
 
 def test_status_dropped_when_the_tunnel_is_gone(server_list):
