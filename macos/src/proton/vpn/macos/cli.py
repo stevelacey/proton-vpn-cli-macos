@@ -139,7 +139,7 @@ def main():
     from proton.vpn.cli import main as cli_main
 
     command = next((arg for arg in sys.argv[1:] if not arg.startswith("-")), None)
-    if command == "connect":
+    if command == "connect" and not {"--help", "-h"} & set(sys.argv):
         privileged.ensure_set_up()
     with contextlib.nullcontext() if command in READ_ONLY_COMMANDS else locked():
         # Skips the check for Proton's Linux GUI over D-Bus.

@@ -107,5 +107,12 @@ def test_main_does_not_lock_read_only_commands(proton_main, monkeypatch):
 def test_main_refuses_to_connect_before_setup(proton_main, monkeypatch):
     monkeypatch.setattr(privileged, "is_set_up", lambda: False)
     monkeypatch.setattr(sys, "argv", ["protonvpn", "connect"])
-    with pytest.raises(SystemExit, match="vpn setup"):
+    with pytest.raises(SystemExit, match="run `protonvpn setup`"):
         cli.main()
+
+
+def test_main_shows_connects_help_before_setup(proton_main, monkeypatch):
+    monkeypatch.setattr(privileged, "is_set_up", lambda: False)
+    monkeypatch.setattr(sys, "argv", ["protonvpn", "connect", "--help"])
+    cli.main()
+    assert proton_main[-1] == {"allow_concurrency": True}
