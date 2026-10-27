@@ -29,4 +29,6 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: macos/coverage.xml
       - run: uv run vpn help
-      - run: uv run protonvpn --help
+      # By module: Proton's own package installs a protonvpn script too, so which one the
+      # venv ends up with depends on install order.
+      - run: uv run python -m proton.vpn.macos.cli --help

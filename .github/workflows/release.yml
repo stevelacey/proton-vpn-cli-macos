@@ -85,7 +85,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/*.whl --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
+          # Notes from our previous release, not Proton's v-prefixed tags, which the fork has too.
+          previous=$(gh release list --repo "$GITHUB_REPOSITORY" --json tagName -q '.[].tagName' | grep -v '^v' | head -1)
+          gh release create "$GITHUB_REF_NAME" dist/*.whl --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" \
+            --generate-notes ${previous:+--notes-start-tag "$previous"}
           wheel=$(basename dist/*.whl)
           echo "url=https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/$wheel" >> "$GITHUB_OUTPUT"
 
