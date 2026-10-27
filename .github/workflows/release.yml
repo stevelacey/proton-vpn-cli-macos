@@ -27,7 +27,6 @@ jobs:
         run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
 
       - run: uv sync --locked
-      - run: uv run pytest
 
       - name: Build a universal wheel
         run: |
@@ -36,6 +35,9 @@ jobs:
           else
             uv run scripts/build-wheel --universal
           fi
+
+      # After the build, which puts the Rust extension in place for them.
+      - run: uv run pytest
 
       - name: Check the wheel installs and runs
         run: |
