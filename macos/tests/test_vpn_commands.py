@@ -413,3 +413,58 @@ def test_main_splits_alfreds_single_argument(monkeypatch):
     monkeypatch.setattr(vpn, "set_dns", chosen.append)
     vpn.main(["dns cloudflare"])
     assert chosen == ["cloudflare"]
+
+
+def test_country_codes_needs_protons_module(monkeypatch, tmp_path):
+    import proton.vpn
+    monkeypatch.setattr(proton.vpn, "__path__", [str(tmp_path)])
+    with pytest.raises(RuntimeError, match="country_codes module is missing"):
+        vpn._country_codes()
+
+
+def test_signin_in_terminal_asks_terminal_for_the_username(monkeypatch):
+    ran = []
+    monkeypatch.setattr("shutil.which", lambda name: "/opt/homebrew/bin/protonvpn")
+    monkeypatch.setattr("subprocess.run", lambda args, check: ran.append(args))
+    vpn.signin_in_terminal()
+    (args,) = ran
+    assert args[:2] == ["/usr/bin/osascript", "-e"]
+    assert args[2] == ('tell application "Terminal" to do script '
+                       '"read -p \\"Proton username: \\" username && /opt/homebrew/bin/protonvpn signin \\"$username\\""')
+    assert args[3:] == ["-e", 'tell application "Terminal" to activate']
+
+
+def test_signin_in_terminal_finds_protonvpn_beside_vpn(monkeypatch):
+    ran = []
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    monkeypatch.setattr(sys, "argv", ["/opt/vpn tools/bin/vpn"])
+    monkeypatch.setattr("subprocess.run", lambda args, check: ran.append(args))
+    vpn.signin_in_terminal()
+    assert "'/opt/vpn tools/bin/protonvpn' signin" in ran[0][2]
+
+
+def test_main_signin_opens_terminal(monkeypatch):
+    opened = []
+    monkeypatch.setattr(vpn, "signin_in_terminal", lambda: opened.append(True))
+    vpn.main(["signin"])
+    assert opened == [True]
+
+
+def test_signin_from_stdin_runs_protons_signin_in_the_child(monkeypatch):
+    import os
+    import pty
+    monkeypatch.setattr(sys, "stdin", io.StringIO("steve\nsecret\n"))
+    monkeypatch.setattr(pty, "fork", lambda: (0, 5))
+    execs = []
+
+    class Execed(Exception):
+        pass
+
+    def execv(path, args):
+        execs.append(args)
+        raise Execed
+
+    monkeypatch.setattr(os, "execv", execv)
+    with pytest.raises(Execed):
+        vpn.signin_from_stdin()
+    assert execs == [[sys.executable, "-m", "proton.vpn.macos.cli", "signin", "steve", "--totp"]]

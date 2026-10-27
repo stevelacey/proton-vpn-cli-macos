@@ -323,3 +323,56 @@ def test_notify_from_the_agent_thread_records_the_exit_ip(lifecycle, paths, monk
     assert exit_ip.read_text() == "9.9.9.9"
     lifecycle._notify_subscribers_threadsafe(Connected(None))
     assert len(scheduled) == 2
+
+
+def test_import_without_networkmanager_keeps_an_imported_package():
+    package = wireguard.sys.modules["proton.vpn.backend.networkmanager.core"]
+    wireguard._import_without_networkmanager("proton.vpn.backend.networkmanager.core")
+    assert wireguard.sys.modules["proton.vpn.backend.networkmanager.core"] is package
+
+
+def test_init_keeps_the_running_loop():
+    async def create():
+        wg = WgQuickWireguard("server", "credentials", "settings", "tier",
+                              connection_persistence=object(), publisher=object())
+        return wg, asyncio.get_running_loop()
+
+    wg, loop = asyncio.run(create())
+    assert wg._asyncio_loop is loop and not wg._cancelled
+    assert wg._user_tier == "tier" and not wg._agent_listener.is_running
+    assert isinstance(wg.initial_state, states.Disconnected)
+
+
+def test_feature_updates_apply_while_active():
+    assert connection().are_feature_updates_applied_when_active
+
+
+def test_update_credentials_restarts_the_agent_listener(lifecycle):
+    async def start():
+        lifecycle.log.append("listener")
+
+    lifecycle._start_local_agent_listener = start
+    asyncio.run(lifecycle.update_credentials("new credentials"))
+    assert lifecycle._vpncredentials == "new credentials"
+    assert lifecycle.log == ["listener"]
+
+
+def test_update_settings_requests_features_from_a_running_agent(lifecycle):
+    async def request(features):
+        lifecycle.log.append(("features", features))
+
+    lifecycle._agent_listener = Listener(running=True)
+    lifecycle._request_connection_features = request
+    settings = types.SimpleNamespace(features="new features")
+    asyncio.run(lifecycle.update_settings(settings))
+    assert lifecycle._settings is settings
+    assert lifecycle.log == [("features", "new features")]
+
+
+def test_update_settings_starts_an_agent_for_an_earlier_runs_tunnel(lifecycle):
+    settings = types.SimpleNamespace(features="new features")
+    asyncio.run(lifecycle.update_settings(settings))
+    assert lifecycle.log == []
+    lifecycle.device = "utun4"
+    asyncio.run(lifecycle.update_settings(settings))
+    assert lifecycle.log == ["agent"]
