@@ -2,7 +2,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/proton-vpn-cli-macos.svg?style=flat-square)](https://pypi.org/project/proton-vpn-cli-macos/)
 [![CI](https://img.shields.io/github/actions/workflow/status/stevelacey/proton-vpn-cli-macos/ci.yml?branch=main&style=flat-square)](https://github.com/stevelacey/proton-vpn-cli-macos/actions/workflows/ci.yml?query=branch:main)
-[![Coverage](https://img.shields.io/codecov/c/github/stevelacey/proton-vpn-cli-macos?style=flat-square)](https://codecov.io/gh/stevelacey/proton-vpn-cli-macos)
+[![Coverage](https://img.shields.io/codecov/c/github/stevelacey/proton-vpn-cli-macos/main?style=flat-square)](https://codecov.io/gh/stevelacey/proton-vpn-cli-macos)
 [![Downloads](https://img.shields.io/pepy/dt/proton-vpn-cli-macos.svg?style=flat-square)](https://pypi.org/project/proton-vpn-cli-macos/)
 [![License](https://img.shields.io/github/license/stevelacey/proton-vpn-cli-macos?style=flat-square)](https://github.com/stevelacey/proton-vpn-cli-macos/blob/main/LICENSE)
 
