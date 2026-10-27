@@ -474,6 +474,15 @@ def test_renew_stalled_forwarding(files, monkeypatch, tmp_path):
     assert calls == ["keep", "keep"]
 
 
+def test_main_ip(monkeypatch, capsys):
+    monkeypatch.setattr(vpn, "status", lambda: {"state": "Connected", "ip": "1.2.3.4"})
+    vpn.main(["ip"])
+    assert capsys.readouterr().out == "1.2.3.4\n"
+    monkeypatch.setattr(vpn, "status", lambda: {"state": "Disconnected"})
+    with pytest.raises(SystemExit, match="not connected"):
+        vpn.main(["ip"])
+
+
 def test_main_port(monkeypatch, capsys):
     monkeypatch.setattr(vpn, "status", lambda: {"state": "Connected", "port": 39020})
     vpn.main(["port"])

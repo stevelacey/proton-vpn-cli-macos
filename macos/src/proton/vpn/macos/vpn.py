@@ -16,6 +16,7 @@
   protonvpn set <setting> <value>  change a setting, e.g. protonvpn set netshield malware-only
   protonvpn account            the signed-in account and plan (--json)
   protonvpn signin <username>  sign in; protonvpn signout signs out
+  protonvpn ip                 the IP address sites see, while connected
   protonvpn port               the forwarded port, while port forwarding's on
   protonvpn forward            keep the forwarded port alive (started for you, in the background)
 
@@ -674,6 +675,8 @@ def commands(query, current):
         ("P2P", "Fastest P2P server; add a country", "p2p", ["p2p", "torrent"]),
         ("Tor", "Fastest Tor server; add a country", "tor", ["tor", "onion"]),
     ]
+    if current.get("ip") and current["state"] == "Connected":
+        candidates.append((f"Copy IP {current['ip']}", "The IP address sites see", "ip", ["ip", "copy", "address"]))
     if current.get("port"):
         candidates.append((f"Copy port {current['port']}", "The forwarded port", "port",
                            ["port", "copy", "forwarded port"]))
@@ -695,11 +698,11 @@ def commands(query, current):
                   # What you'd type, e.g. "sign in" rather than "signin --terminal".
                   "autocomplete": arg + " " if arg in MODES else keywords[0] if "--" in arg or arg.startswith("set ") else arg,
                   "variables": {"notice": notice(title)}}
-        if arg == "port":
+        if arg in ("ip", "port"):
             # The workflow shows ⌥'s in large type and pastes ⌘'s.
-            port = str(current["port"])
-            result["mods"] = {"alt": {"arg": port, "subtitle": f"Large Type {port}"},
-                              "cmd": {"arg": port, "subtitle": f"Paste {port}"}}
+            value = str(current[arg])
+            result["mods"] = {"alt": {"arg": value, "subtitle": f"Large Type {value}"},
+                              "cmd": {"arg": value, "subtitle": f"Paste {value}"}}
         if any(k.startswith(q) for k in [title.lower(), *keywords]):
             strong.append(result)
         elif any(w.startswith(q) for k in [title.lower(), *keywords] for w in k.split()):
@@ -720,6 +723,8 @@ def notice(title):
         return "Opening Terminal to sign in…"
     if title.startswith("Copy port "):
         return f"Port {title.removeprefix('Copy port ')} copied"
+    if title.startswith("Copy IP "):
+        return f"IP {title.removeprefix('Copy IP ')} copied"
     return f"Connecting to the {title.lower()}…" if title.endswith("server") else f"Connecting to {title}…"
 
 
@@ -800,6 +805,11 @@ def main(argv=None):
         set_dns(words[1].lower())
     elif words[0] == "forward":
         forward()
+    elif words[0] == "ip":
+        current = status()
+        if current["state"] != "Connected" or not current.get("ip"):
+            sys.exit("protonvpn: not connected")
+        print(current["ip"])
     elif words[0] == "port":
         port = status().get("port")
         if not port:

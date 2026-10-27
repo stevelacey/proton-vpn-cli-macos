@@ -170,6 +170,16 @@ def test_commands_copy_the_forwarded_port(files):
     assert not strong
 
 
+def test_commands_copy_the_ip(files):
+    strong, weak = vpn.commands("ip", {"state": "Connected", "server": "CH#1", "ip": "1.2.3.4"})
+    assert strong[0]["title"] == "Copy IP 1.2.3.4"
+    assert strong[0]["arg"] == "ip"
+    assert strong[0]["variables"]["notice"] == "IP 1.2.3.4 copied"
+    assert strong[0]["mods"]["alt"] == {"arg": "1.2.3.4", "subtitle": "Large Type 1.2.3.4"}
+    strong, weak = vpn.commands("ip", {"state": "Dropped", "server": "CH#1", "ip": "1.2.3.4"})
+    assert not any(r["arg"] == "ip" for r in strong + weak)
+
+
 def test_icon(tmp_path, monkeypatch):
     assert vpn.icon("CH") == {}
     (tmp_path / "CH.png").write_bytes(b"")
