@@ -476,7 +476,10 @@ def forward():
             nat_pmp_map("tcp")
             path.parent.mkdir(parents=True, exist_ok=True)
             if not path.exists() or path.read_text().strip() != str(port):
-                path.write_text(str(port))
+                # Replaced rather than rewritten, which tells anything watching its folder, like the menu bar app.
+                new = path.with_name(path.name + ".new")
+                new.write_text(str(port))
+                new.replace(path)
                 print(f"Forwarded port {port}", flush=True)
             else:
                 # Shows it's being renewed, for status to restart it when it isn't.
