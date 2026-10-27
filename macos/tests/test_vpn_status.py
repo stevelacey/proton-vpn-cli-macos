@@ -159,6 +159,15 @@ def test_commands_match_titles_and_keywords(files):
     assert not strong and not weak
 
 
+def test_commands_copy_the_forwarded_port(files):
+    strong, weak = vpn.commands("port", {"state": "Connected", "server": "CH#1", "port": 39020})
+    assert strong[0]["title"] == "Copy port 39020"
+    assert strong[0]["arg"] == "port"
+    assert strong[0]["variables"]["notice"] == "Port 39020 copied"
+    strong, weak = vpn.commands("copy", {"state": "Connected", "server": "CH#1"})
+    assert not strong
+
+
 def test_icon(tmp_path, monkeypatch):
     assert vpn.icon("CH") == {}
     (tmp_path / "CH.png").write_bytes(b"")

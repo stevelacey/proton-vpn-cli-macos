@@ -16,6 +16,7 @@
   protonvpn set <setting> <value>  change a setting, e.g. protonvpn set netshield malware-only
   protonvpn account            the signed-in account and plan (--json)
   protonvpn signin <username>  sign in; protonvpn signout signs out
+  protonvpn port               the forwarded port, while port forwarding's on
   protonvpn forward            keep the forwarded port alive (started for you, in the background)
 
 Proton's own commands work too: connect, disconnect, status, servers, countries, cities, config,
@@ -667,6 +668,9 @@ def commands(query, current):
         ("P2P", "Fastest P2P server; add a country", "p2p", ["p2p", "torrent"]),
         ("Tor", "Fastest Tor server; add a country", "tor", ["tor", "onion"]),
     ]
+    if current.get("port"):
+        candidates.append((f"Copy port {current['port']}", "The forwarded port", "port",
+                           ["port", "copy", "forwarded port"]))
     for title, arg, keywords in toggles(settings()):
         candidates.append((title, "Proton VPN setting", arg, keywords))
     in_use = settings()["dns"]
@@ -703,6 +707,8 @@ def notice(title):
         return {"Disconnect": "Disconnecting…", "Sign out": "Signing out…"}[title]
     if title == "Sign in":
         return "Opening Terminal to sign in…"
+    if title.startswith("Copy port "):
+        return f"Port {title.removeprefix('Copy port ')} copied"
     return f"Connecting to the {title.lower()}…" if title.endswith("server") else f"Connecting to {title}…"
 
 
@@ -783,6 +789,11 @@ def main(argv=None):
         set_dns(words[1].lower())
     elif words[0] == "forward":
         forward()
+    elif words[0] == "port":
+        port = status().get("port")
+        if not port:
+            sys.exit("protonvpn: no forwarded port (protonvpn set port-forwarding on, on a P2P server)")
+        print(port)
     elif words[0] == "settings":
         current = settings()
         print(json.dumps(current) if "--json" in flags else "\n".join(f"{k}: {v}" for k, v in current.items()))
