@@ -651,6 +651,9 @@ def alfred(items, query):
             "variables": {"notice": f"Connecting to {c['name']}" + (f" ({note})" if note else "") + "…"},
         })
     results += weak
+    for result in results:
+        # Without its own, Alfred offers to search Finder for the result under ⌥ and ⌘.
+        result.setdefault("mods", {mod: {"valid": False, "subtitle": result.get("subtitle", "")} for mod in ("alt", "cmd")})
     print(json.dumps({"items": results}))
 
 
@@ -689,6 +692,11 @@ def commands(query, current):
                   # What you'd type, e.g. "sign in" rather than "signin --terminal".
                   "autocomplete": arg + " " if arg in MODES else keywords[0] if "--" in arg or arg.startswith("set ") else arg,
                   "variables": {"notice": notice(title)}}
+        if arg == "port":
+            # The workflow shows ⌥'s in large type and pastes ⌘'s.
+            port = str(current["port"])
+            result["mods"] = {"alt": {"arg": port, "subtitle": f"Large Type {port}"},
+                              "cmd": {"arg": port, "subtitle": f"Paste {port}"}}
         if any(k.startswith(q) for k in [title.lower(), *keywords]):
             strong.append(result)
         elif any(w.startswith(q) for k in [title.lower(), *keywords] for w in k.split()):

@@ -164,6 +164,8 @@ def test_commands_copy_the_forwarded_port(files):
     assert strong[0]["title"] == "Copy port 39020"
     assert strong[0]["arg"] == "port"
     assert strong[0]["variables"]["notice"] == "Port 39020 copied"
+    assert strong[0]["mods"] == {"alt": {"arg": "39020", "subtitle": "Large Type 39020"},
+                                 "cmd": {"arg": "39020", "subtitle": "Paste 39020"}}
     strong, weak = vpn.commands("copy", {"state": "Connected", "server": "CH#1"})
     assert not strong
 
@@ -195,6 +197,13 @@ def test_alfred_offers_disconnect_when_connected(server_list, monkeypatch, capsy
     assert titles[1] == "Disconnect"
 
 
+def test_alfred_results_do_nothing_under_modifiers_unless_they_say(server_list, capsys):
+    vpn.main(["list", "--alfred", "swiss"])
+    item = json.loads(capsys.readouterr().out)["items"][0]
+    assert item["mods"]["alt"] == {"valid": False, "subtitle": item["subtitle"]}
+    assert item["mods"]["cmd"] == {"valid": False, "subtitle": item["subtitle"]}
+
+
 def test_alfred_lists_matching_countries_after_commands(server_list, capsys):
     items = alfred(capsys, "swiss")
     assert items[0]["arg"] == "CH"
@@ -205,8 +214,9 @@ def test_alfred_lists_matching_countries_after_commands(server_list, capsys):
 def test_alfred_modes_carry_through_and_filter_countries(server_list, capsys):
     # A mode on its own offers its fastest server, then the countries that have it.
     items = alfred(capsys, "p2p")
-    assert items[0] == {"title": "Fastest server (P2P)", "arg": "p2p", "autocomplete": "p2p ",
-                        "variables": {"notice": "Connecting to the fastest server (P2P)…"}}
+    assert {k: v for k, v in items[0].items() if k != "mods"} == {
+        "title": "Fastest server (P2P)", "arg": "p2p", "autocomplete": "p2p ",
+        "variables": {"notice": "Connecting to the fastest server (P2P)…"}}
     assert [(i["title"], i["arg"]) for i in items[1:]] == [("Switzerland (P2P)", "p2p CH")]
 
     items = alfred(capsys, "p2p swiss")
