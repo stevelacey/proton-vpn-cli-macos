@@ -139,8 +139,8 @@ def main():
     from proton.vpn.cli import main as cli_main
 
     command = next((arg for arg in sys.argv[1:] if not arg.startswith("-")), None)
-    if command == "connect" and not privileged.is_set_up():
-        sys.exit("Connecting needs a one-time setup first: run `vpn setup`, which asks for your password.")
+    if command == "connect":
+        privileged.ensure_set_up()
     with contextlib.nullcontext() if command in READ_ONLY_COMMANDS else locked():
         # Skips the check for Proton's Linux GUI over D-Bus.
         cli_main(allow_concurrency=True)

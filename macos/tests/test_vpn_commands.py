@@ -133,9 +133,10 @@ def test_main_settings_text(files, capsys):
         "netshield: 1", "kill_switch: 0", "port_forwarding: False", "dns: proton"]
 
 
-def test_main_help(capsys):
-    vpn.main(["help"])
-    assert capsys.readouterr().out.startswith("Proton VPN, the short way.")
+@pytest.mark.parametrize("argv", [["help"], ["--help"], ["-h"]])
+def test_main_help(capsys, argv):
+    vpn.main(argv)
+    assert capsys.readouterr().out.startswith("Proton VPN on macOS: Proton's CLI, plus short commands")
 
 
 def test_main_dispatches_set_dns_and_forward(monkeypatch):
@@ -443,11 +444,54 @@ def test_signin_in_terminal_finds_protonvpn_beside_vpn(monkeypatch):
     assert "'/opt/vpn tools/bin/protonvpn' signin" in ran[0][2]
 
 
-def test_main_signin_opens_terminal(monkeypatch):
+def test_main_signin_opens_terminal_for_alfred(monkeypatch):
     opened = []
     monkeypatch.setattr(vpn, "signin_in_terminal", lambda: opened.append(True))
-    vpn.main(["signin"])
+    vpn.main(["signin --terminal"])
     assert opened == [True]
+
+
+@pytest.mark.parametrize("argv", [
+    ["connect", "--country", "CH"], ["config", "set", "netshield", "off"], ["info"], ["countries"],
+    ["signin", "steve"], ["servers"], ["status", "--verbose"], ["-v"],
+])
+def test_main_passes_protons_commands_to_its_cli(monkeypatch, argv):
+    from proton.vpn.macos import cli
+    ran = []
+    monkeypatch.setattr(cli, "main", lambda: ran.append(list(sys.argv)))
+    vpn.main(argv)
+    assert ran == [["protonvpn", *argv]]
+
+
+def test_main_keeps_its_own_commands(monkeypatch):
+    assert not vpn.is_protons([], [])
+    assert not vpn.is_protons(["swiss"], [])
+    assert not vpn.is_protons(["servers", "ch"], ["--json"])
+    assert not vpn.is_protons(["signin"], ["--stdin"])
+    assert not vpn.is_protons(["setup", "wade"], ["--user"])
+    assert vpn.is_protons(["connect"], ["--help"])
+
+
+def test_main_setup_signs_in_from_a_terminal(monkeypatch):
+    calls = []
+    monkeypatch.setattr(privileged, "setup", lambda user: calls.append(("setup", user)))
+    monkeypatch.setattr(vpn, "protonvpn", lambda *args: calls.append(args))
+    monkeypatch.setattr(vpn.os, "geteuid", lambda: 501)
+    monkeypatch.setattr(sys, "stdin", types.SimpleNamespace(isatty=lambda: True))
+    monkeypatch.setattr(vpn, "account", lambda: None)
+    monkeypatch.setattr("builtins.input", lambda prompt: " steve ")
+    vpn.main(["setup"])
+    assert calls == [("setup", None), ("signin", "steve")]
+
+    calls.clear()
+    monkeypatch.setattr("builtins.input", lambda prompt: "")
+    vpn.main(["setup"])
+    assert calls == [("setup", None)]
+
+    calls.clear()
+    monkeypatch.setattr(vpn, "account", lambda: {"username": "steve"})
+    vpn.main(["setup"])
+    assert calls == [("setup", None)]
 
 
 def test_signin_from_stdin_runs_protons_signin_in_the_child(monkeypatch):

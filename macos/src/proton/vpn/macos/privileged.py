@@ -1,5 +1,5 @@
 """
-Running the root-only parts (wg-quick, pfctl, networksetup) through the helper `vpn setup` installs.
+Running the root-only parts (wg-quick, pfctl, networksetup) through the helper `protonvpn setup` installs.
 
 The helper is root-owned and its user may run it with sudo without a password; see helper.sh for
 what it accepts.
@@ -42,6 +42,16 @@ def is_set_up() -> bool:
     return result.returncode == 0 and result.stdout.strip() == bundled_version()
 
 
+def ensure_set_up():
+    """Connecting needs the helper: sets it up first in a terminal, where sudo can ask for the password."""
+    if is_set_up():
+        return
+    if not sys.stdin.isatty():
+        sys.exit("protonvpn: connecting needs a one-time setup first: run `protonvpn setup`, which asks for your password.")
+    print("Connecting needs a one-time setup first, which asks for your Mac password.")
+    setup()
+
+
 def setup(user: Optional[str] = None):
     """
     Installs the helper and the sudo rule for it, as root; otherwise reruns itself with sudo,
@@ -49,7 +59,13 @@ def setup(user: Optional[str] = None):
     """
     user = user or os.environ.get("SUDO_USER") or getpass.getuser()
     if os.geteuid() != 0:
-        os.execv("/usr/bin/sudo", ["sudo", sys.executable, "-m", "proton.vpn.macos.vpn", "setup", "--user", user])
+        if is_set_up():
+            print("Already set up: connecting doesn't need your password.")
+            return
+        command = ["/usr/bin/sudo", sys.executable, "-m", "proton.vpn.macos.vpn", "setup", "--user", user]
+        if subprocess.run(command, check=False).returncode:
+            sys.exit(1)
+        return
 
     HELPER.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(SOURCE, HELPER)
@@ -61,7 +77,7 @@ def setup(user: Optional[str] = None):
         file.write(rule)
     if subprocess.run(["/usr/sbin/visudo", "-cf", file.name], capture_output=True, check=False).returncode:
         os.unlink(file.name)
-        sys.exit("vpn: the sudo rule didn't validate, so nothing was changed in /etc/sudoers.d")
+        sys.exit("protonvpn: the sudo rule didn't validate, so nothing was changed in /etc/sudoers.d")
     os.chown(file.name, 0, 0)
     os.chmod(file.name, 0o440)
     shutil.move(file.name, SUDOERS)

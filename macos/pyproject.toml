@@ -14,8 +14,7 @@ dependencies = [
 Homepage = "https://github.com/stevelacey/proton-vpn-cli-macos"
 
 [project.scripts]
-protonvpn = "proton.vpn.macos.cli:main"
-vpn = "proton.vpn.macos.vpn:main"
+protonvpn = "proton.vpn.macos.vpn:main"
 
 [project.entry-points.proton_loader_keyring]
 keychain = "proton.vpn.macos.keychain:KeychainKeyring"

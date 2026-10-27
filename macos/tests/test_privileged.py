@@ -63,12 +63,49 @@ def test_is_set_up(helper, monkeypatch):
 
 
 def test_setup_reruns_itself_with_sudo_when_not_root(helper, monkeypatch):
-    execs = []
+    ran = []
     monkeypatch.setattr(os, "geteuid", lambda: 501)
-    monkeypatch.setattr(os, "execv", lambda path, argv: execs.append((path, argv)) or (_ for _ in ()).throw(SystemExit))
-    with pytest.raises(SystemExit):
+    monkeypatch.setattr(privileged, "is_set_up", lambda: False)
+    monkeypatch.setattr(subprocess, "run", lambda cmd, check: ran.append(cmd) or types.SimpleNamespace(returncode=0))
+    privileged.setup("wade")
+    assert ran == [["/usr/bin/sudo", sys.executable, "-m", "proton.vpn.macos.vpn", "setup", "--user", "wade"]]
+
+
+def test_setup_stops_when_sudo_fails(helper, monkeypatch):
+    monkeypatch.setattr(os, "geteuid", lambda: 501)
+    monkeypatch.setattr(privileged, "is_set_up", lambda: False)
+    monkeypatch.setattr(subprocess, "run", lambda cmd, check: types.SimpleNamespace(returncode=1))
+    with pytest.raises(SystemExit) as exit:
         privileged.setup("wade")
-    assert execs == [("/usr/bin/sudo", ["sudo", sys.executable, "-m", "proton.vpn.macos.vpn", "setup", "--user", "wade"])]
+    assert exit.value.code == 1
+
+
+def test_setup_skips_sudo_when_already_set_up(helper, monkeypatch, capsys):
+    monkeypatch.setattr(os, "geteuid", lambda: 501)
+    monkeypatch.setattr(privileged, "is_set_up", lambda: True)
+    privileged.setup("wade")
+    assert capsys.readouterr().out == "Already set up: connecting doesn't need your password.\n"
+
+
+def test_ensure_set_up_sets_up_in_a_terminal(monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr(privileged, "setup", lambda: calls.append("setup"))
+    monkeypatch.setattr(privileged, "is_set_up", lambda: True)
+    privileged.ensure_set_up()
+    assert calls == []
+
+    monkeypatch.setattr(privileged, "is_set_up", lambda: False)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True, raising=False)
+    privileged.ensure_set_up()
+    assert calls == ["setup"]
+    assert "one-time setup first" in capsys.readouterr().out
+
+
+def test_ensure_set_up_without_a_terminal(monkeypatch):
+    monkeypatch.setattr(privileged, "is_set_up", lambda: False)
+    monkeypatch.setattr(sys, "stdin", types.SimpleNamespace(isatty=lambda: False))
+    with pytest.raises(SystemExit, match="run `protonvpn setup`"):
+        privileged.ensure_set_up()
 
 
 def root_setup(monkeypatch, valid=True, tools=("wg-quick", "wireguard-go")):

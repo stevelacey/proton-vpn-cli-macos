@@ -1,5 +1,5 @@
 #!/bin/bash
-# The few things Proton VPN CLI for macOS needs root for. `vpn setup` installs this root-owned and
+# The few things Proton VPN CLI for macOS needs root for. `protonvpn setup` installs this root-owned and
 # lets its user run it through sudo without a password, so it takes no paths or commands: a tunnel
 # config comes in on stdin and is only used if it's a plain WireGuard config, since wg-quick runs
 # PreUp/PostUp lines as root.

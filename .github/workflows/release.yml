@@ -41,8 +41,8 @@ jobs:
 
       - name: Check the wheel installs and runs
         run: |
-          uvx --from dist/*.whl vpn help
-          uvx --from dist/*.whl protonvpn --help
+          uvx --from dist/*.whl protonvpn help
+          uvx --from dist/*.whl protonvpn connect --help
 
       - uses: actions/upload-artifact@v5
         with:

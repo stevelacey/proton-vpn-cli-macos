@@ -1,25 +1,26 @@
-"""Proton VPN, the short way.
+"""Proton VPN on macOS: Proton's CLI, plus short commands and the Mac setup.
 
-  vpn                  show the current connection (--json for the menu bar app)
-  vpn <country>        connect to the fastest server in a country, e.g. vpn swiss, vpn ch, vpn japan
-  vpn <server>         connect to a specific server, e.g. vpn CH#10
-  vpn fastest          connect to the fastest server anywhere
-  vpn random [country] connect to a random server (anywhere, or in a country)
-  vpn sc [country]     connect through Secure Core; also p2p, tor, e.g. vpn p2p nl
-  vpn off              disconnect
-  vpn setup            one-time setup, so connecting doesn't need your password (--check)
-  vpn account          the signed-in account and plan (--json)
-  vpn signout          sign out (sign in with: protonvpn signin <username>)
-  vpn city [mode] <city>  connect to the fastest server in a city, e.g. vpn city new york
-  vpn servers [modes] <country>  list a country's servers by city, least loaded first (--json)
-  vpn list [query]     list matching countries (--alfred for Alfred script filter JSON, --json)
-  vpn dns <choice>     proton, cloudflare, google, opendns or quad9
-  vpn forward          keep the forwarded port alive (the menu bar app runs this)
-  vpn settings         show NetShield, kill switch and port forwarding (--json)
-  vpn set <setting> <value>   change a setting, as protonvpn config set
+  protonvpn setup              one-time setup: lets connecting run without your password, and signs you in
+  protonvpn                    the current connection (--json for the menu bar app)
+  protonvpn <country>          the fastest server in a country, e.g. protonvpn swiss, protonvpn ch
+  protonvpn <server>           a specific server, e.g. protonvpn CH#10
+  protonvpn fastest            the fastest server anywhere
+  protonvpn random [country]   a random server, anywhere or in a country
+  protonvpn sc [country]       through Secure Core; also p2p and tor, e.g. protonvpn p2p nl
+  protonvpn city [mode] <city> the fastest server in a city, e.g. protonvpn city new york
+  protonvpn off                disconnect
+  protonvpn servers [modes] <country>  a country's servers by city, least loaded first (--json)
+  protonvpn list [query]       matching countries (--json; --alfred for Alfred)
+  protonvpn dns <choice>       proton, cloudflare, google, opendns or quad9
+  protonvpn settings           NetShield, kill switch and port forwarding (--json)
+  protonvpn set <setting> <value>  change a setting, e.g. protonvpn set netshield malware-only
+  protonvpn account            the signed-in account and plan (--json)
+  protonvpn signin <username>  sign in; protonvpn signout signs out
+  protonvpn forward            keep the forwarded port alive (the menu bar app runs this)
 
-Connecting and disconnecting go through Proton's own CLI (protonvpn). Status and the
-country list are read from its caches, so they're instant and work offline.
+Proton's own commands work too: connect, disconnect, status, servers, countries, cities, config,
+signin, signout and info (protonvpn <command> --help). Status and the country list are read from
+Proton's caches, so they're instant and work offline.
 """
 import importlib.util
 import json
@@ -298,7 +299,7 @@ def set_dns(choice):
     """Switches DNS, reconnecting to the same server, since DNS is part of the tunnel's config."""
     from proton.vpn.macos.cli import locked  # pylint: disable=import-outside-toplevel
     if choice not in ("proton", *DNS_PROVIDERS):
-        sys.exit(f"vpn: unknown DNS '{choice}' (proton, {', '.join(DNS_PROVIDERS)})")
+        sys.exit(f"protonvpn: unknown DNS '{choice}' (proton, {', '.join(DNS_PROVIDERS)})")
 
     with locked():
         current = status()
@@ -466,7 +467,7 @@ def forward():
                 path.write_text(str(port))
                 print(f"Forwarded port {port}", flush=True)
         except OSError as exc:
-            print(f"vpn: couldn't renew the forwarded port: {exc}", file=sys.stderr, flush=True)
+            print(f"protonvpn: couldn't renew the forwarded port: {exc}", file=sys.stderr, flush=True)
             wait = 2
         time.sleep(wait)
 
@@ -491,8 +492,8 @@ def protonvpn(*args):
     """Runs Proton's CLI in this process."""
     from proton.vpn.macos import cli  # pylint: disable=import-outside-toplevel
     from proton.vpn.macos import privileged  # pylint: disable=import-outside-toplevel
-    if args and args[0] == "connect" and not privileged.is_set_up():
-        sys.exit("vpn: connecting needs a one-time setup first: run `vpn setup`, which asks for your password.")
+    if args and args[0] == "connect":
+        privileged.ensure_set_up()
     sys.argv[0] = "protonvpn"
     cli.install()
     from proton.vpn.cli import main as cli_main  # pylint: disable=import-outside-toplevel
@@ -522,7 +523,7 @@ def connect(args):
             # No cached server list yet, so let Proton's CLI work out the country.
             protonvpn("connect", "--country", query, *options)
             return
-        sys.exit(f"vpn: no country matches '{query}' (try: vpn list)")
+        sys.exit(f"protonvpn: no country matches '{query}' (try: protonvpn list)")
 
     current = status()
     if not options and current["state"] == "Connected" and current.get("code") == found[0]["code"] \
@@ -587,7 +588,7 @@ def commands(query, current):
     if current["state"] != "Disconnected":
         candidates.append(("Disconnect", describe(current), "off", ["off", "disconnect", "stop"]))
     candidates += [
-        ("Sign in…", "Opens Terminal to sign in to your Proton account", "signin", ["sign in", "signin", "login", "account"]),
+        ("Sign in…", "Opens Terminal to sign in to your Proton account", "signin --terminal", ["sign in", "signin", "login", "account"]),
         ("Sign out", "Disconnects and forgets your Proton sign-in", "signout", ["sign out", "signout", "logout"]),
         ("Fastest server", "Quick Connect", "fastest", ["fastest", "quick", "connect"]),
         ("Random server", "Anywhere", "random", ["random"]),
@@ -639,15 +640,39 @@ def icon(code):
     return {"path": str(path)} if path and path.exists() else {}
 
 
+# Proton's commands, which its CLI handles; these flags are this one's.
+PROTON_COMMANDS = {"connect", "config", "info", "countries", "cities"}
+OWN_FLAGS = {"--json", "--alfred", "--check", "--user", "--stdin", "--terminal", "--help", "-h"}
+
+
+def is_protons(words, flags):
+    """Whether a command line is for Proton's CLI: one of its commands, or with its options."""
+    if any(flag.split("=")[0] not in OWN_FLAGS for flag in flags):
+        return True
+    if not words:
+        return False
+    return (words[0] in PROTON_COMMANDS
+            or (words[0] in ("signin", "login") and not {"--stdin", "--terminal"} & set(flags))
+            or (words[0] == "servers" and len(words) < 2))
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if len(argv) == 1 and " " in argv[0].strip():
         # Alfred passes everything as one argument, e.g. "dns cloudflare".
         argv = argv[0].split()
-    flags = [a for a in argv if a.startswith("--")]
-    words = [a for a in argv if not a.startswith("--")]
+    flags = [a for a in argv if a.startswith("-")]
+    words = [a for a in argv if not a.startswith("-")]
 
-    if not words or words[0] == "status":
+    if is_protons(words, flags):
+        from proton.vpn.macos import cli  # pylint: disable=import-outside-toplevel
+        sys.argv = ["protonvpn", *argv]
+        cli.main()
+        return
+
+    if (words[:1] == ["help"] and len(words) == 1) or (not words and {"--help", "-h"} & set(flags)):
+        print(__doc__.strip())
+    elif not words or words[0] == "status":
         current = status()
         print(json.dumps(current) if "--json" in flags else describe(current))
     elif words[0] in ("off", "disconnect", "down"):
@@ -663,9 +688,15 @@ def main(argv=None):
             sys.exit(0 if privileged.is_set_up() else 1)
         user = argv[argv.index("--user") + 1] if "--user" in argv else None
         privileged.setup(user)
+        # Then signs in, when it's you in a terminal rather than the menu bar app setting up as root.
+        if os.geteuid() != 0 and sys.stdin.isatty() and account() is None:
+            username = input("Proton username: ").strip()
+            if username:
+                protonvpn("signin", username)
     elif words[0] in ("signin", "login") and "--stdin" in flags:
         signin_from_stdin()
     elif words[0] in ("signin", "login"):
+        # For Alfred, which shouldn't see a password: --terminal.
         signin_in_terminal()
     elif words[0] == "account":
         current = account()
@@ -711,8 +742,6 @@ def main(argv=None):
         else:
             for c in match(query, items):
                 print(f"{c['code']}  {c['name']}  ({c['servers']} servers)")
-    elif words[0] in ("help",) or "--help" in flags or "-h" in argv:
-        print(__doc__.strip())
     else:
         connect(words)
 

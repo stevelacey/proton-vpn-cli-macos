@@ -149,7 +149,7 @@ class WgQuickWireguard(VPNConnection, LocalAgentMixin):
         """Notifies subscribers from the local agent's thread."""
         details = event.context.connection_details
         if isinstance(event, events.Connected) and details and details.server_ipv4:
-            # For `vpn status`, which reads files rather than asking the local agent.
+            # For `protonvpn status`, which reads files rather than asking the local agent.
             exit_ip_path().write_text(details.server_ipv4, encoding="utf-8")
         self._asyncio_loop.call_soon_threadsafe(self._notify_subscribers, event)
 
@@ -175,7 +175,7 @@ class WgQuickWireguard(VPNConnection, LocalAgentMixin):
         await reset_leftover_dns()
 
         self._unique_id = str(uuid.uuid4())
-        # Kept for `vpn status`, without the private key; the helper keeps its own copy to bring
+        # Kept for `protonvpn status`, without the private key; the helper keeps its own copy to bring
         # the tunnel down.
         config = self._generate_config()
         path = config_path()

@@ -20,43 +20,41 @@ Proton's Mac app, not alongside it, since it runs its own VPN connection that th
 
 ```sh
 brew install stevelacey/tap/proton-vpn-cli
-vpn setup
-protonvpn signin <username>
+protonvpn setup
 ```
 
-`vpn setup` asks for your password once, so connecting doesn't need it again. Connecting needs root
-for `wg-quick`, `pfctl` and `networksetup`; setup installs a small root-owned helper that only does
-those, and only takes plain WireGuard configs.
+`protonvpn setup` asks for your Mac password once, so connecting doesn't need it again, then signs
+you in to your Proton account. Connecting needs root for `wg-quick`, `pfctl` and `networksetup`;
+setup installs a small root-owned helper that only does those, and only takes plain WireGuard configs.
 
 Or install it with `uv tool install proton-vpn-cli-macos` (or pipx), plus `brew install wireguard-tools bash`.
 
 ## Use
 
 ```sh
-vpn                          # status
-vpn swiss                    # fastest server in a country, by name, code or alias
-vpn fastest
-vpn random japan
-vpn sc japan                 # Secure Core; also p2p and tor
-vpn CH#871                   # a specific server
-vpn city new york
-vpn servers ch               # servers by city, least loaded first
-vpn off
-vpn dns cloudflare           # proton, cloudflare, google, opendns or quad9
-vpn set kill-switch standard
-vpn set netshield malware-ads-trackers
-vpn set port-forwarding on
-vpn help
+protonvpn                          # status
+protonvpn swiss                    # fastest server in a country, by name, code or alias
+protonvpn fastest
+protonvpn random japan
+protonvpn sc japan                 # Secure Core; also p2p and tor
+protonvpn CH#871                   # a specific server
+protonvpn city new york
+protonvpn servers ch               # servers by city, least loaded first
+protonvpn dns cloudflare           # proton, cloudflare, google, opendns or quad9
+protonvpn set kill-switch standard
+protonvpn set netshield malware-ads-trackers
+protonvpn set port-forwarding on
+protonvpn off
+protonvpn help
 ```
 
-`protonvpn` has the full set of commands and options:
+Proton's own commands and options work too:
 
 ```sh
-protonvpn connect --country CH
 protonvpn connect --city "New York" --p2p
 protonvpn config set netshield malware-ads-trackers
-protonvpn status
-protonvpn --help
+protonvpn countries list
+protonvpn connect --help
 ```
 
 ## How it works
@@ -76,7 +74,7 @@ brew install rust wireguard-tools bash
 scripts/build-platform
 uv sync
 uv run pytest
-uv run vpn setup
+uv run python -m proton.vpn.macos.vpn setup
 ```
 
 ## License
