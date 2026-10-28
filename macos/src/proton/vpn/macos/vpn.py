@@ -123,10 +123,21 @@ def logicals():
         return []
 
 
+def max_tier():
+    """The highest server tier the account can use: 0 on Proton Free, 2 on paid plans."""
+    try:
+        return json.loads(SERVER_LIST.read_text()).get("MaxTier", 2)
+    except (OSError, ValueError):
+        return 2
+
+
 def countries():
-    """Countries with regular servers, and what any of their servers support."""
+    """Countries with regular servers on the account's plan, and what any of their servers support."""
     found = {}
+    tier = max_tier()
     for logical in logicals():
+        if logical.get("Tier", 0) > tier:
+            continue
         features = logical.get("Features", 0)
         country = found.setdefault(logical["ExitCountry"], {"servers": 0, "features": set(), "combos": set()})
         if features & SECURE_CORE_FEATURE:
@@ -165,14 +176,11 @@ def countries():
 def servers(code, modes=()):
     """A country's online servers for some modes (sc, p2p, tor), by city, least loaded first."""
     modes = {"sc" if m == "securecore" else m for m in ([modes] if isinstance(modes, str) else modes)}
-    try:
-        max_tier = json.loads(SERVER_LIST.read_text()).get("MaxTier", 2)
-    except (OSError, ValueError):
-        max_tier = 2
+    tier = max_tier()
     cities = {}
     for logical in logicals():
         features = logical.get("Features", 0)
-        if logical["ExitCountry"] != code or logical.get("Status") != 1 or logical.get("Tier", 0) > max_tier:
+        if logical["ExitCountry"] != code or logical.get("Status") != 1 or logical.get("Tier", 0) > tier:
             continue
         if bool(features & SECURE_CORE_FEATURE) != ("sc" in modes):
             continue

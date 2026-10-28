@@ -89,6 +89,15 @@ def test_countries_summarize_servers_and_features(server_list):
     assert found["SE"]["features"] == ["smartrouting"]
 
 
+def test_countries_only_count_servers_on_the_accounts_plan(files):
+    (files / "serverlist.json").write_text(json.dumps({"MaxTier": 0, "LogicalServers": [
+        {"Name": "CH-FREE#1", "ExitCountry": "CH", "Features": 0, "Tier": 0},
+        {"Name": "CH#1", "ExitCountry": "CH", "Features": 0, "Tier": 2},
+        {"Name": "US#1", "ExitCountry": "US", "Features": 0, "Tier": 2},
+    ]}))
+    assert [(c["code"], c["servers"]) for c in vpn.countries()] == [("CH", 1)]
+
+
 def test_country_name_falls_back_to_the_code(files):
     assert vpn.country_name("CH") == "Switzerland"
     assert vpn.country_name("ZZ") == "ZZ"
