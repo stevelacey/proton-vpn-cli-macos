@@ -4,6 +4,7 @@ import fcntl
 import os
 import sys
 import tempfile
+import types
 
 from proton.vpn.macos import bundled
 
@@ -128,12 +129,40 @@ def _explain_port_forwarding():
     settings.set_group.commands[feature.command].epilog = settings._format_setting_epilog(feature)
 
 
+ISSUES = "https://github.com/stevelacey/proton-vpn-cli-macos/issues"
+
+
+def _report_errors_here():
+    """
+    Proton's CLI sends unexpected errors to its Linux support, which can't help with
+    this fork, so they point to its issues instead.
+    """
+    # pylint: disable=import-outside-toplevel
+    import click
+    import proton.vpn.cli as proton_cli
+
+    class Click(types.ModuleType):
+        """Proton's CLI's click, but with its echo."""
+
+        def __getattr__(self, name):
+            return getattr(click, name)
+
+        @staticmethod
+        def echo(message=None, *args, **kwargs):
+            if isinstance(message, str) and "os=Linux" in message:
+                message = message.split("If the error persists")[0] + f"If it persists, please open an issue: {ISSUES}"
+            click.echo(message, *args, **kwargs)
+
+    proton_cli.click = Click("click")
+
+
 def install():
     """Plugs the macOS backends into Proton's api-core."""
     ProtonVPNAPI.create_registry = staticmethod(create_registry)
     _wait_for_current_tasks_ignoring_cancelled()
     _add_adult_content_netshield()
     _explain_port_forwarding()
+    _report_errors_here()
 
     # Setting these up front stops the loader from importing the Linux
     # implementations that api-core declares as entry points.

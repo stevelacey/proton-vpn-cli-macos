@@ -162,3 +162,22 @@ def test_port_forwarding_messages_point_to_status_not_protons_linux_guide(monkey
     # Once is enough.
     cli._explain_port_forwarding()
     assert command.epilog.count("How It Works") == 1
+
+
+def test_unexpected_errors_point_to_the_forks_issues(monkeypatch, capsys):
+    import proton.vpn.cli as proton_cli
+    monkeypatch.setattr(proton_cli, "click", proton_cli.click)
+    cli._report_errors_here()
+    proton_cli.click.echo(
+        "An unexpected error occurred. Please try again.\n"
+        "If the error persists please contact customer support: "
+        "https://protonvpn.com/support/contact?subject=%5BCLI%5D&os=Linux&platform=VPN%20for%20Linux"
+    )
+    proton_cli.click.echo("Connected.")
+    assert capsys.readouterr().out == (
+        "An unexpected error occurred. Please try again.\n"
+        f"If it persists, please open an issue: {cli.ISSUES}\n"
+        "Connected.\n"
+    )
+    # The rest of click is still click.
+    assert proton_cli.click.Abort is __import__("click").Abort
