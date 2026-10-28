@@ -146,7 +146,7 @@ def install():
 def locked():
     """
     Holds a lock for the length of a command that changes the connection or
-    settings, so that overlapping commands (say from the menu bar and Alfred)
+    settings, so that overlapping commands (say from two apps at once)
     queue up instead of racing, which leaves wg-quick saving the tunnel's DNS
     as the one to restore. The environment variable lets child processes in.
     """

@@ -250,33 +250,3 @@ def test_install_tools_copies_them_with_bashs_libraries(tmp_path, monkeypatch):
     assert set(chowns) == {(0, 0)} and len(chowns) == 9
     assert (tools / "bash").stat().st_mode & 0o777 == 0o755
     assert (tools / "lib" / "libreadline.8.dylib").stat().st_mode & 0o777 == 0o644
-
-
-@pytest.mark.parametrize("outdated, returncode, stderr, expected", [
-    (["bash"], 0, "", "WireGuard tools refreshed\n"),
-    ([], 0, "", "Set up: wade can now connect without a password.\n"),
-])
-def test_setup_in_dialog(monkeypatch, capsys, outdated, returncode, stderr, expected):
-    ran = []
-    monkeypatch.setattr(privileged, "outdated_tools", lambda: outdated)
-    monkeypatch.setattr(privileged.getpass, "getuser", lambda: "wade")
-    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: ran.append(cmd) or types.SimpleNamespace(
-        returncode=returncode, stderr=stderr, stdout="Set up: wade can now connect without a password.\n"))
-    privileged.setup_in_dialog()
-    assert capsys.readouterr().out == expected
-    (cmd,) = ran
-    assert cmd[:2] == ["/usr/bin/osascript", "-e"]
-    assert cmd[2] == (f'do shell script "{sys.executable} -m proton.vpn.macos.vpn setup --user wade" '
-                      "with administrator privileges")
-
-
-@pytest.mark.parametrize("stderr, message", [
-    ("execution error: User canceled. (-128)", "Setup cancelled"),
-    ("execution error: something broke (1)", "protonvpn: execution error: something broke (1)"),
-])
-def test_setup_in_dialog_fails(monkeypatch, stderr, message):
-    monkeypatch.setattr(privileged, "outdated_tools", lambda: [])
-    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: types.SimpleNamespace(returncode=1, stderr=stderr))
-    with pytest.raises(SystemExit) as exit:
-        privileged.setup_in_dialog()
-    assert exit.value.code == message

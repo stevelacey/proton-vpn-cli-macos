@@ -64,7 +64,6 @@ def files(tmp_path, monkeypatch):
     monkeypatch.setattr(vpn, "EXIT_IP", cache / "connection" / "exit_ip")
     monkeypatch.setattr(vpn, "WG_CONFIG", cache / "connection" / "proton.conf")
     monkeypatch.setattr(vpn, "SETTINGS", tmp_path / "settings.json")
-    monkeypatch.setattr(vpn, "FLAGS", None)
     monkeypatch.setattr(vpn, "forwarded_port_path", lambda: tmp_path / "forwarded_port")
     monkeypatch.setattr(vpn, "watched_path", lambda: tmp_path / "watching")
     monkeypatch.setattr(vpn, "tunnel_device", lambda: None)

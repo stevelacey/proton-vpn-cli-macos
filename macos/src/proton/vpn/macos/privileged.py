@@ -96,21 +96,6 @@ def setup(user: Optional[str] = None):
     print(f"Set up: {user} can now connect without a password.")
 
 
-def setup_in_dialog():
-    """
-    Runs setup as root after macOS's own password dialog, for Alfred, which has no terminal and
-    shouldn't see the password.
-    """
-    import shlex  # pylint: disable=import-outside-toplevel
-    refreshing = bool(outdated_tools())
-    command = shlex.join([sys.executable, "-m", "proton.vpn.macos.vpn", "setup", "--user", getpass.getuser()])
-    script = f"do shell script {json.dumps(command)} with administrator privileges"
-    result = subprocess.run(["/usr/bin/osascript", "-e", script], capture_output=True, text=True, check=False)
-    if result.returncode:
-        sys.exit("Setup cancelled" if "User canceled" in result.stderr else f"protonvpn: {result.stderr.strip()}")
-    print("WireGuard tools refreshed" if refreshing else result.stdout.strip())
-
-
 def writable_by_others(path: Path) -> Optional[Path]:
     """The first of path and its parents that isn't root's alone, if any."""
     for folder in (path, *path.parents):

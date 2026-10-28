@@ -1,7 +1,7 @@
 """Proton VPN on macOS: Proton's CLI, plus short commands and the Mac setup.
 
   protonvpn setup              one-time setup: lets connecting run without your password, and signs you in
-  protonvpn                    the current connection (--json for the menu bar app)
+  protonvpn                    the current connection (--json)
   protonvpn <country>          the fastest server in a country, e.g. protonvpn swiss, protonvpn ch
   protonvpn <server>           a specific server, e.g. protonvpn CH#10
   protonvpn fastest            the fastest server anywhere
@@ -10,7 +10,7 @@
   protonvpn city [mode] <city> the fastest server in a city, e.g. protonvpn city new york
   protonvpn off                disconnect
   protonvpn servers [modes] <country>  a country's servers by city, least loaded first (--json)
-  protonvpn list [query]       matching countries (--json; --alfred for Alfred)
+  protonvpn list [query]       matching countries (--json)
   protonvpn dns <choice>       proton, cloudflare, google, opendns or quad9
   protonvpn settings           NetShield, kill switch and port forwarding (--json)
   protonvpn set <setting> <value>  change a setting, e.g. protonvpn set netshield malware-only
@@ -55,8 +55,6 @@ DNS_PROVIDERS = {
     "quad9": ["9.9.9.9", "149.112.112.112"],
 }
 SETTINGS = Path.home() / ".config" / "Proton" / "VPN" / "settings.json"
-# Flag icons the Alfred workflow renders into its cache.
-FLAGS = Path(os.environ["alfred_workflow_cache"], "flags") if os.environ.get("alfred_workflow_cache") else None
 
 ALIASES = {
     "AE": ["uae", "emirates", "dubai"],
@@ -281,7 +279,7 @@ def status():
 
 
 def settings():
-    """Proton's settings that the menu bar and Alfred toggle, from its settings file."""
+    """Proton's settings that apps toggle, from its settings file."""
     try:
         data = json.loads(SETTINGS.read_text())
     except (OSError, ValueError):
@@ -319,22 +317,6 @@ def set_dns(choice):
             run_protonvpn("config", "set", "custom-dns", "off")
         if current["state"] == "Connected":
             protonvpn("connect", current["server"])
-
-
-def toggles(current_settings):
-    """Commands that flip each setting, as (title, arg, keywords)."""
-    on = current_settings
-    return [
-        ("Turn NetShield off" if on["netshield"] else "Turn NetShield on",
-         f"set netshield {'off' if on['netshield'] else 'malware-ads-trackers'}",
-         ["netshield", "adblock", "ads"]),
-        ("Turn kill switch off" if on["kill_switch"] else "Turn kill switch on",
-         f"set kill-switch {'off' if on['kill_switch'] else 'standard'}",
-         ["kill switch", "killswitch"]),
-        ("Turn port forwarding off" if on["port_forwarding"] else "Turn port forwarding on",
-         f"set port-forwarding {'off' if on['port_forwarding'] else 'on'}",
-         ["port forwarding", "forwarding"]),
-    ]
 
 
 def set_setting(name, value):
@@ -377,20 +359,10 @@ def account():
     return {"username": api.account_name, "plan": api.account_data.plan_title, "tier": api.account_data.max_tier}
 
 
-def in_terminal(command):
-    """Opens Terminal to run a protonvpn command, for Alfred, which shouldn't see a password."""
-    import shlex  # pylint: disable=import-outside-toplevel
-    import shutil  # pylint: disable=import-outside-toplevel
-    import subprocess  # pylint: disable=import-outside-toplevel
-    protonvpn = shlex.quote(shutil.which("protonvpn") or str(Path(sys.argv[0]).with_name("protonvpn")))
-    script = f'tell application "Terminal" to do script {json.dumps(command.format(protonvpn=protonvpn))}'
-    subprocess.run(["/usr/bin/osascript", "-e", script, "-e", 'tell application "Terminal" to activate'], check=False)
-
-
 def signin_from_stdin():
     """
     Signs in with Proton's own signin command, answering its prompts from lines on stdin,
-    for the menu bar app: the username, then the password, then 2FA codes when asked for.
+    for apps without a terminal: the username, then the password, then 2FA codes when asked for.
 
     Proton's CLI reads the password from the terminal, so it runs in a pseudo-terminal.
     Prints "2fa" when a code is needed, "2fa invalid" when one was wrong, then "ok <account>"
@@ -521,7 +493,7 @@ def forward_port():
         return 2
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists() or path.read_text().strip() != str(port):
-        # Replaced rather than rewritten, which tells anything watching its folder, like the menu bar app.
+        # Replaced rather than rewritten, which tells anything watching its folder.
         new = path.with_name(path.name + ".new")
         new.write_text(str(port))
         new.replace(path)
@@ -677,7 +649,7 @@ def protonvpn(*args):
 
 def connect(args):
     """Connects to the fastest server in a country, or a specific server, with any modes in front."""
-    args = " ".join(args).split()  # Alfred passes everything as one argument
+    args = " ".join(args).split()  # Words in one argument or several, e.g. "sc ch"
     options = []
     while args and args[0] in MODES:
         options.append(MODES[args.pop(0)])
@@ -707,142 +679,9 @@ def connect(args):
     protonvpn("connect", "--country", found[0]["code"], *options)
 
 
-def alfred(items, query):
-    """Alfred script filter results; mode words in front (sc, p2p, tor, random) carry through."""
-    words = query.split()
-    modes = []
-    while words and words[0].lower() in MODES:
-        modes.append(words.pop(0).lower())
-    query = " ".join(words)
-    prefix = " ".join(modes)
-    labels = {"--securecore": "Secure Core", "--p2p": "P2P", "--tor": "Tor", "--random": "random server"}
-    note = ", ".join(labels[MODES[m]] for m in modes)
-
-    current = status()
-    results = []
-    weak = []
-    if query and not modes:
-        strong, weak = commands(query, current)
-        results += strong
-    # In a mode, only countries that have servers for it.
-    required = {"sc": "securecore", "securecore": "securecore", "p2p": "p2p", "tor": "tor"}
-    for mode in modes:
-        if mode in required:
-            items = [c for c in items if required[mode] in c["features"]]
-    if not query and not modes:
-        results.append({"title": describe(current), "subtitle": "Proton VPN", "valid": False,
-                        "icon": icon(current.get("code"))})
-        # Up top while Homebrew has newer WireGuard tools than the copies setup made.
-        results += [result for result in commands("refresh", current)[0] if result["arg"] == "setup --dialog"]
-        if current["state"] != "Disconnected":
-            results.append({"title": "Disconnect", "arg": "off", "autocomplete": "off"})
-        results.append({"title": "Fastest server", "subtitle": "Quick Connect", "arg": "fastest", "autocomplete": "fastest"})
-        results.append({"title": "Random server", "subtitle": "Anywhere", "arg": "random", "autocomplete": "random "})
-        results.append({"title": "Secure Core", "subtitle": "Fastest Secure Core server; add a country", "arg": "sc",
-                        "autocomplete": "sc "})
-    elif not query:
-        results.append({"title": f"Fastest server ({note})", "arg": prefix, "autocomplete": prefix + " ",
-                        "variables": {"notice": f"Connecting to the fastest server ({note})…"}})
-    # A mode on its own also lists its countries, to pick one.
-    for c in match(query, items) if query or modes else []:
-        results.append({
-            "uid": f"{prefix} {c['code']}".strip(),
-            "title": c["name"] + (f" ({note})" if note else ""),
-            "subtitle": f"{c['code']} · {c['servers']} servers",
-            "arg": f"{prefix} {c['code']}".strip(),
-            "autocomplete": f"{prefix} {c['name']}".strip(),
-            "icon": icon(c["code"]),
-            "variables": {"notice": f"Connecting to {c['name']}" + (f" ({note})" if note else "") + "…"},
-        })
-    results += weak
-    for result in results:
-        # Without its own, Alfred offers to search Finder for the result under ⌥ and ⌘.
-        result.setdefault("mods", {mod: {"valid": False, "subtitle": result.get("subtitle", "")} for mod in ("alt", "cmd")})
-    print(json.dumps({"items": results}))
-
-
-def commands(query, current):
-    """Alfred results for commands whose title or keywords start with the query."""
-    from proton.vpn.macos import privileged  # pylint: disable=import-outside-toplevel
-    candidates = []
-    if privileged.outdated_tools():
-        candidates.append(("Refresh WireGuard tools", "Homebrew has newer versions", "setup --dialog",
-                           ["refresh", "wireguard", "setup"]))
-    if current["state"] != "Disconnected":
-        candidates.append(("Disconnect", describe(current), "off", ["off", "disconnect", "stop"]))
-    candidates += [
-        ("Sign in…", "Opens Terminal to sign in to your Proton account", "signin --terminal", ["sign in", "signin", "login", "account"]),
-        ("Sign out", "Disconnects and forgets your Proton sign-in", "signout", ["sign out", "signout", "logout"]),
-        ("Fastest server", "Quick Connect", "fastest", ["fastest", "quick", "connect"]),
-        ("Random server", "Anywhere", "random", ["random"]),
-        ("Secure Core", "Fastest Secure Core server; add a country", "sc", ["sc", "secure core"]),
-        ("P2P", "Fastest P2P server; add a country", "p2p", ["p2p", "torrent"]),
-        ("Tor", "Fastest Tor server; add a country", "tor", ["tor", "onion"]),
-    ]
-    if current.get("ip") and current["state"] == "Connected":
-        candidates.append((f"Copy IP {current['ip']}", "The IP address sites see", "ip", ["ip", "copy", "address"]))
-    if current.get("port"):
-        candidates.append((f"Copy port {current['port']}", "The forwarded port", "port",
-                           ["port", "copy", "forwarded port"]))
-    for title, arg, keywords in toggles(settings()):
-        candidates.append((title, "Proton VPN setting", arg, keywords))
-    in_use = settings()["dns"]
-    for choice in ["proton", *DNS_PROVIDERS]:
-        name = {"proton": "Proton", "opendns": "OpenDNS"}.get(choice, choice.title())
-        candidates.append((
-            f"Use {name}{'' if name.endswith('DNS') else ' DNS'}" + (" (in use)" if choice == in_use else ""),
-            "Through the VPN",
-            f"dns {choice}", ["dns", choice],
-        ))
-
-    q = fold(query.strip())
-    strong, weak = [], []
-    for title, subtitle, arg, keywords in candidates:
-        result = {"title": title, "subtitle": subtitle, "arg": arg,
-                  # What you'd type, e.g. "sign in" rather than "signin --terminal".
-                  "autocomplete": arg + " " if arg in MODES else keywords[0] if "--" in arg or arg.startswith("set ") else arg,
-                  "variables": {"notice": notice(title)}}
-        if arg in ("ip", "port"):
-            # The workflow shows ⌥'s in large type and pastes ⌘'s.
-            value = str(current[arg])
-            result["mods"] = {"alt": {"arg": value, "subtitle": f"Large Type {value}"},
-                              "cmd": {"arg": value, "subtitle": f"Paste {value}"}}
-        if any(k.startswith(q) for k in [title.lower(), *keywords]):
-            strong.append(result)
-        elif any(w.startswith(q) for k in [title.lower(), *keywords] for w in k.split()):
-            weak.append(result)
-    return strong, weak
-
-
-def notice(title):
-    """What the Alfred workflow says as soon as a result is chosen, before the command finishes."""
-    title = title.removesuffix(" (in use)").removesuffix("…")
-    if title.startswith("Turn "):
-        return f"Turning {title.removeprefix('Turn ')}…"
-    if title.startswith("Use "):
-        return f"Switching to {title.removeprefix('Use ')}…"
-    if title in ("Disconnect", "Sign out"):
-        return {"Disconnect": "Disconnecting…", "Sign out": "Signing out…"}[title]
-    if title == "Sign in":
-        return "Opening Terminal to sign in…"
-    if title == "Refresh WireGuard tools":
-        return "Refreshing WireGuard tools…"
-    if title.startswith("Copy port "):
-        return f"Port {title.removeprefix('Copy port ')} copied"
-    if title.startswith("Copy IP "):
-        return f"IP {title.removeprefix('Copy IP ')} copied"
-    return f"Connecting to the {title.lower()}…" if title.endswith("server") else f"Connecting to {title}…"
-
-
-def icon(code):
-    """The country's flag, when the Alfred workflow has rendered it."""
-    path = FLAGS / f"{code}.png" if FLAGS and code else None
-    return {"path": str(path)} if path and path.exists() else {}
-
-
 # Proton's commands, which its CLI handles; these flags are this one's.
 PROTON_COMMANDS = {"connect", "config", "info", "countries", "cities"}
-OWN_FLAGS = {"--json", "--alfred", "--check", "--user", "--stdin", "--terminal", "--dialog", "--help", "-h"}
+OWN_FLAGS = {"--json", "--check", "--user", "--stdin", "--help", "-h"}
 
 
 def is_protons(words, flags):
@@ -852,15 +691,12 @@ def is_protons(words, flags):
     if not words:
         return False
     return (words[0] in PROTON_COMMANDS
-            or (words[0] in ("signin", "login") and not {"--stdin", "--terminal"} & set(flags))
+            or (words[0] in ("signin", "login") and "--stdin" not in flags)
             or (words[0] == "servers" and len(words) < 2))
 
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
-    if len(argv) == 1 and " " in argv[0].strip():
-        # Alfred passes everything as one argument, e.g. "dns cloudflare".
-        argv = argv[0].split()
     flags = [a for a in argv if a.startswith("-")]
     words = [a for a in argv if not a.startswith("-")]
 
@@ -893,21 +729,15 @@ def main(argv=None):
         from proton.vpn.macos import privileged  # pylint: disable=import-outside-toplevel
         if "--check" in flags:
             sys.exit(0 if privileged.is_set_up() else 1)
-        if "--dialog" in flags:
-            privileged.setup_in_dialog()
-            return
         user = argv[argv.index("--user") + 1] if "--user" in argv else None
         privileged.setup(user)
-        # Then signs in, when it's you in a terminal rather than the menu bar app setting up as root.
+        # Then signs in, when it's you in a terminal rather than an app setting up as root.
         if os.geteuid() != 0 and sys.stdin.isatty() and account() is None:
             username = input("Proton username: ").strip()
             if username:
                 protonvpn("signin", username)
-    elif words[0] in ("signin", "login") and "--stdin" in flags:
-        signin_from_stdin()
     elif words[0] in ("signin", "login"):
-        # For Alfred, which shouldn't see a password: --terminal.
-        in_terminal('read -p "Proton username: " username && {protonvpn} signin "$username"')
+        signin_from_stdin()
     elif words[0] == "account":
         current = account()
         if "--json" in flags:
@@ -955,9 +785,7 @@ def main(argv=None):
     elif words[0] in ("list", "ls"):
         query = " ".join(words[1:])
         items = countries()
-        if "--alfred" in flags:
-            alfred(items, query)
-        elif "--json" in flags:
+        if "--json" in flags:
             print(json.dumps(match(query, items)))
         else:
             for c in match(query, items):
