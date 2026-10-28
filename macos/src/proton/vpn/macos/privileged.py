@@ -5,6 +5,7 @@ The helper is root-owned and its user may run it with sudo without a password; s
 what it accepts.
 """
 import getpass
+import json
 import os
 import shutil
 import subprocess
@@ -62,7 +63,7 @@ def setup(user: Optional[str] = None):
     """
     user = user or os.environ.get("SUDO_USER") or getpass.getuser()
     if os.geteuid() != 0:
-        if is_set_up():
+        if is_set_up() and not outdated_tools():
             print("Already set up: connecting doesn't need your password.")
             return
         command = ["/usr/bin/sudo", sys.executable, "-m", "proton.vpn.macos.vpn", "setup", "--user", user]
@@ -93,6 +94,21 @@ def setup(user: Optional[str] = None):
     os.chmod(file.name, 0o440)
     shutil.move(file.name, SUDOERS)
     print(f"Set up: {user} can now connect without a password.")
+
+
+def setup_in_dialog():
+    """
+    Runs setup as root after macOS's own password dialog, for Alfred, which has no terminal and
+    shouldn't see the password.
+    """
+    import shlex  # pylint: disable=import-outside-toplevel
+    refreshing = bool(outdated_tools())
+    command = shlex.join([sys.executable, "-m", "proton.vpn.macos.vpn", "setup", "--user", getpass.getuser()])
+    script = f"do shell script {json.dumps(command)} with administrator privileges"
+    result = subprocess.run(["/usr/bin/osascript", "-e", script], capture_output=True, text=True, check=False)
+    if result.returncode:
+        sys.exit("Setup cancelled" if "User canceled" in result.stderr else f"protonvpn: {result.stderr.strip()}")
+    print("WireGuard tools refreshed" if refreshing else result.stdout.strip())
 
 
 def writable_by_others(path: Path) -> Optional[Path]:
@@ -126,6 +142,8 @@ def install_tools(found: dict[str, str]):
     (staging / "lib").mkdir(parents=True)
     for tool, path in found.items():
         shutil.copyfile(os.path.realpath(path), staging / tool)
+    # Where each came from, which names its version, e.g. /opt/homebrew/Cellar/bash/5.3.20/bin/bash.
+    (staging / "sources.json").write_text(json.dumps({tool: os.path.realpath(path) for tool, path in found.items()}))
 
     # bash's libraries go in lib, and everything that loads them is pointed there, then signed again.
     pending, changed = [staging / "bash"], []
@@ -151,6 +169,16 @@ def install_tools(found: dict[str, str]):
         os.chmod(folder, 0o755)
         for name in files:
             os.chown(os.path.join(folder, name), 0, 0)
-            os.chmod(os.path.join(folder, name), 0o644 if folder.endswith("lib") else 0o755)
+            os.chmod(os.path.join(folder, name), 0o644 if folder.endswith("lib") or name.endswith(".json") else 0o755)
     shutil.rmtree(TOOLS, ignore_errors=True)
     staging.rename(TOOLS)
+
+
+def outdated_tools() -> list[str]:
+    """The tools Homebrew has updated since setup copied them, which setup copies again."""
+    try:
+        copied = json.loads((TOOLS / "sources.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    current = {tool: shutil.which(tool, path=HOMEBREW) for tool in copied}
+    return [tool for tool, source in copied.items() if current[tool] and os.path.realpath(current[tool]) != source]

@@ -740,11 +740,11 @@ def test_country_codes_needs_protons_module(monkeypatch, tmp_path):
         vpn._country_codes()
 
 
-def test_signin_in_terminal_asks_terminal_for_the_username(monkeypatch):
+def test_in_terminal_runs_a_protonvpn_command_in_terminal(monkeypatch):
     ran = []
     monkeypatch.setattr("shutil.which", lambda name: "/opt/homebrew/bin/protonvpn")
     monkeypatch.setattr("subprocess.run", lambda args, check: ran.append(args))
-    vpn.signin_in_terminal()
+    vpn.in_terminal('read -p "Proton username: " username && {protonvpn} signin "$username"')
     (args,) = ran
     assert args[:2] == ["/usr/bin/osascript", "-e"]
     assert args[2] == ('tell application "Terminal" to do script '
@@ -752,20 +752,54 @@ def test_signin_in_terminal_asks_terminal_for_the_username(monkeypatch):
     assert args[3:] == ["-e", 'tell application "Terminal" to activate']
 
 
-def test_signin_in_terminal_finds_protonvpn_beside_vpn(monkeypatch):
+def test_in_terminal_finds_protonvpn_beside_vpn(monkeypatch):
     ran = []
     monkeypatch.setattr("shutil.which", lambda name: None)
     monkeypatch.setattr(sys, "argv", ["/opt/vpn tools/bin/vpn"])
     monkeypatch.setattr("subprocess.run", lambda args, check: ran.append(args))
-    vpn.signin_in_terminal()
-    assert "'/opt/vpn tools/bin/protonvpn' signin" in ran[0][2]
+    vpn.in_terminal("{protonvpn} setup")
+    assert "'/opt/vpn tools/bin/protonvpn' setup" in ran[0][2]
 
 
-def test_main_signin_opens_terminal_for_alfred(monkeypatch):
+def test_main_opens_terminal_for_alfred_to_sign_in(monkeypatch):
     opened = []
-    monkeypatch.setattr(vpn, "signin_in_terminal", lambda: opened.append(True))
+    monkeypatch.setattr(vpn, "in_terminal", opened.append)
     vpn.main(["signin --terminal"])
-    assert opened == [True]
+    assert opened == ['read -p "Proton username: " username && {protonvpn} signin "$username"']
+
+
+def test_main_sets_up_in_a_dialog_for_alfred(monkeypatch):
+    from proton.vpn.macos import privileged
+    calls = []
+    monkeypatch.setattr(privileged, "setup_in_dialog", lambda: calls.append("dialog"))
+    vpn.main(["setup --dialog"])
+    assert calls == ["dialog"]
+
+
+def test_main_status_says_when_the_tools_are_out_of_date(files, monkeypatch, capsys):
+    from proton.vpn.macos import privileged
+    monkeypatch.setattr(privileged, "outdated_tools", lambda: ["bash", "wg"])
+    vpn.main(["status"])
+    assert capsys.readouterr().out == "Disconnected\nHomebrew has newer bash, wg: run protonvpn setup to use them\n"
+    vpn.main(["status", "--json"])
+    assert json.loads(capsys.readouterr().out) == {"state": "Disconnected", "outdated_tools": ["bash", "wg"]}
+
+
+def test_alfred_offers_to_refresh_out_of_date_tools(files, monkeypatch, capsys):
+    from proton.vpn.macos import privileged
+    monkeypatch.setattr(privileged, "outdated_tools", lambda: ["bash"])
+    strong, _ = vpn.commands("", {"state": "Disconnected"})
+    assert strong[0]["title"] == "Refresh WireGuard tools"
+    assert strong[0]["arg"] == "setup --dialog"
+    assert strong[0]["autocomplete"] == "refresh"
+    assert strong[0]["variables"] == {"notice": "Refreshing WireGuard tools…"}
+    monkeypatch.setattr(vpn, "status", lambda: {"state": "Disconnected"})
+    vpn.alfred([], "")
+    assert [item["title"] for item in json.loads(capsys.readouterr().out)["items"]][:2] == [
+        "Disconnected", "Refresh WireGuard tools"]
+    monkeypatch.setattr(privileged, "outdated_tools", lambda: [])
+    strong, _ = vpn.commands("", {"state": "Disconnected"})
+    assert strong[0]["title"] != "Refresh WireGuard tools"
 
 
 @pytest.mark.parametrize("argv", [

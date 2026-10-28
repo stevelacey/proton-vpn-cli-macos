@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import subprocess
@@ -83,8 +84,35 @@ def test_setup_stops_when_sudo_fails(helper, monkeypatch):
 def test_setup_skips_sudo_when_already_set_up(helper, monkeypatch, capsys):
     monkeypatch.setattr(os, "geteuid", lambda: 501)
     monkeypatch.setattr(privileged, "is_set_up", lambda: True)
+    monkeypatch.setattr(privileged, "outdated_tools", lambda: [])
     privileged.setup("wade")
     assert capsys.readouterr().out == "Already set up: connecting doesn't need your password.\n"
+
+
+def test_setup_runs_again_when_the_tools_are_out_of_date(helper, monkeypatch):
+    ran = []
+    monkeypatch.setattr(os, "geteuid", lambda: 501)
+    monkeypatch.setattr(privileged, "is_set_up", lambda: True)
+    monkeypatch.setattr(privileged, "outdated_tools", lambda: ["bash"])
+    monkeypatch.setattr(subprocess, "run", lambda cmd, check: ran.append(cmd) or types.SimpleNamespace(returncode=0))
+    privileged.setup("wade")
+    assert ran[0][:2] == ["/usr/bin/sudo", sys.executable]
+
+
+def test_outdated_tools(tmp_path, monkeypatch):
+    import json
+    brew = tmp_path / "Cellar"
+    for name in ("bash-5.3", "bash-5.4", "wg-1"):
+        (brew / name).mkdir(parents=True)
+        (brew / name / "tool").touch()
+    assert privileged.outdated_tools() == []
+    privileged.TOOLS.mkdir()
+    (privileged.TOOLS / "sources.json").write_text(json.dumps({
+        "bash": str(brew / "bash-5.3" / "tool"), "wg": str(brew / "wg-1" / "tool"), "wireguard-go": "/gone"}))
+    links = {"bash": str(brew / "bash-5.4" / "tool"), "wg": str(brew / "wg-1" / "tool")}
+    monkeypatch.setattr(shutil, "which", lambda tool, path=None: links.get(tool))
+    # Upgraded, but not uninstalled.
+    assert privileged.outdated_tools() == ["bash"]
 
 
 def test_ensure_set_up_sets_up_in_a_terminal(monkeypatch, capsys):
@@ -199,7 +227,9 @@ def test_install_tools_copies_them_with_bashs_libraries(tmp_path, monkeypatch):
     monkeypatch.setattr(os, "chown", lambda path, uid, gid: chowns.append((uid, gid)))
     privileged.install_tools({tool: str(brew / tool) for tool in ("wg-quick", "wg", "wireguard-go", "bash")})
 
-    assert sorted(os.listdir(tools)) == ["bash", "lib", "wg", "wg-quick", "wireguard-go"]
+    assert sorted(os.listdir(tools)) == ["bash", "lib", "sources.json", "wg", "wg-quick", "wireguard-go"]
+    assert json.loads((tools / "sources.json").read_text())["bash"] == str(brew / "bash")
+    assert (tools / "sources.json").stat().st_mode & 0o777 == 0o644
     assert sorted(os.listdir(tools / "lib")) == ["libncursesw.6.dylib", "libreadline.8.dylib"]
     assert (tools / "lib" / "libreadline.8.dylib").read_text() == "libreadline.8.dylib"
     assert not tools.with_name("tools.new").exists()
@@ -217,6 +247,36 @@ def test_install_tools_copies_them_with_bashs_libraries(tmp_path, monkeypatch):
         ["codesign", "--force", "--sign", "-", lib + "libncursesw.6.dylib"],
         ["codesign", "--force", "--sign", "-", "tools.new/bash"],
     ]
-    assert set(chowns) == {(0, 0)} and len(chowns) == 8
+    assert set(chowns) == {(0, 0)} and len(chowns) == 9
     assert (tools / "bash").stat().st_mode & 0o777 == 0o755
     assert (tools / "lib" / "libreadline.8.dylib").stat().st_mode & 0o777 == 0o644
+
+
+@pytest.mark.parametrize("outdated, returncode, stderr, expected", [
+    (["bash"], 0, "", "WireGuard tools refreshed\n"),
+    ([], 0, "", "Set up: wade can now connect without a password.\n"),
+])
+def test_setup_in_dialog(monkeypatch, capsys, outdated, returncode, stderr, expected):
+    ran = []
+    monkeypatch.setattr(privileged, "outdated_tools", lambda: outdated)
+    monkeypatch.setattr(privileged.getpass, "getuser", lambda: "wade")
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: ran.append(cmd) or types.SimpleNamespace(
+        returncode=returncode, stderr=stderr, stdout="Set up: wade can now connect without a password.\n"))
+    privileged.setup_in_dialog()
+    assert capsys.readouterr().out == expected
+    (cmd,) = ran
+    assert cmd[:2] == ["/usr/bin/osascript", "-e"]
+    assert cmd[2] == (f'do shell script "{sys.executable} -m proton.vpn.macos.vpn setup --user wade" '
+                      "with administrator privileges")
+
+
+@pytest.mark.parametrize("stderr, message", [
+    ("execution error: User canceled. (-128)", "Setup cancelled"),
+    ("execution error: something broke (1)", "protonvpn: execution error: something broke (1)"),
+])
+def test_setup_in_dialog_fails(monkeypatch, stderr, message):
+    monkeypatch.setattr(privileged, "outdated_tools", lambda: [])
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: types.SimpleNamespace(returncode=1, stderr=stderr))
+    with pytest.raises(SystemExit) as exit:
+        privileged.setup_in_dialog()
+    assert exit.value.code == message

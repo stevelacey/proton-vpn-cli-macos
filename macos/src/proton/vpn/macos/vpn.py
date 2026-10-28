@@ -377,14 +377,13 @@ def account():
     return {"username": api.account_name, "plan": api.account_data.plan_title, "tier": api.account_data.max_tier}
 
 
-def signin_in_terminal():
-    """Opens Terminal to sign in, for Alfred, which shouldn't see a password."""
+def in_terminal(command):
+    """Opens Terminal to run a protonvpn command, for Alfred, which shouldn't see a password."""
     import shlex  # pylint: disable=import-outside-toplevel
     import shutil  # pylint: disable=import-outside-toplevel
     import subprocess  # pylint: disable=import-outside-toplevel
-    protonvpn = shutil.which("protonvpn") or str(Path(sys.argv[0]).with_name("protonvpn"))
-    command = f'read -p "Proton username: " username && {shlex.quote(protonvpn)} signin "$username"'
-    script = f'tell application "Terminal" to do script {json.dumps(command)}'
+    protonvpn = shlex.quote(shutil.which("protonvpn") or str(Path(sys.argv[0]).with_name("protonvpn")))
+    script = f'tell application "Terminal" to do script {json.dumps(command.format(protonvpn=protonvpn))}'
     subprocess.run(["/usr/bin/osascript", "-e", script, "-e", 'tell application "Terminal" to activate'], check=False)
 
 
@@ -733,6 +732,8 @@ def alfred(items, query):
     if not query and not modes:
         results.append({"title": describe(current), "subtitle": "Proton VPN", "valid": False,
                         "icon": icon(current.get("code"))})
+        # Up top while Homebrew has newer WireGuard tools than the copies setup made.
+        results += [result for result in commands("refresh", current)[0] if result["arg"] == "setup --dialog"]
         if current["state"] != "Disconnected":
             results.append({"title": "Disconnect", "arg": "off", "autocomplete": "off"})
         results.append({"title": "Fastest server", "subtitle": "Quick Connect", "arg": "fastest", "autocomplete": "fastest"})
@@ -762,7 +763,11 @@ def alfred(items, query):
 
 def commands(query, current):
     """Alfred results for commands whose title or keywords start with the query."""
+    from proton.vpn.macos import privileged  # pylint: disable=import-outside-toplevel
     candidates = []
+    if privileged.outdated_tools():
+        candidates.append(("Refresh WireGuard tools", "Homebrew has newer versions", "setup --dialog",
+                           ["refresh", "wireguard", "setup"]))
     if current["state"] != "Disconnected":
         candidates.append(("Disconnect", describe(current), "off", ["off", "disconnect", "stop"]))
     candidates += [
@@ -820,6 +825,8 @@ def notice(title):
         return {"Disconnect": "Disconnecting…", "Sign out": "Signing out…"}[title]
     if title == "Sign in":
         return "Opening Terminal to sign in…"
+    if title == "Refresh WireGuard tools":
+        return "Refreshing WireGuard tools…"
     if title.startswith("Copy port "):
         return f"Port {title.removeprefix('Copy port ')} copied"
     if title.startswith("Copy IP "):
@@ -835,7 +842,7 @@ def icon(code):
 
 # Proton's commands, which its CLI handles; these flags are this one's.
 PROTON_COMMANDS = {"connect", "config", "info", "countries", "cities"}
-OWN_FLAGS = {"--json", "--alfred", "--check", "--user", "--stdin", "--terminal", "--help", "-h"}
+OWN_FLAGS = {"--json", "--alfred", "--check", "--user", "--stdin", "--terminal", "--dialog", "--help", "-h"}
 
 
 def is_protons(words, flags):
@@ -866,8 +873,14 @@ def main(argv=None):
     if (words[:1] == ["help"] and len(words) == 1) or (not words and {"--help", "-h"} & set(flags)):
         print(__doc__.strip())
     elif not words or words[0] == "status":
+        from proton.vpn.macos import privileged  # pylint: disable=import-outside-toplevel
         current = status()
+        outdated = privileged.outdated_tools()
+        if outdated:
+            current["outdated_tools"] = outdated
         print(json.dumps(current) if "--json" in flags else describe(current))
+        if outdated and "--json" not in flags:
+            print(f"Homebrew has newer {', '.join(outdated)}: run protonvpn setup to use them")
         renew_stalled_watching(current)
     elif words[0] in ("off", "disconnect", "down"):
         if status()["state"] == "Disconnected":
@@ -880,6 +893,9 @@ def main(argv=None):
         from proton.vpn.macos import privileged  # pylint: disable=import-outside-toplevel
         if "--check" in flags:
             sys.exit(0 if privileged.is_set_up() else 1)
+        if "--dialog" in flags:
+            privileged.setup_in_dialog()
+            return
         user = argv[argv.index("--user") + 1] if "--user" in argv else None
         privileged.setup(user)
         # Then signs in, when it's you in a terminal rather than the menu bar app setting up as root.
@@ -891,7 +907,7 @@ def main(argv=None):
         signin_from_stdin()
     elif words[0] in ("signin", "login"):
         # For Alfred, which shouldn't see a password: --terminal.
-        signin_in_terminal()
+        in_terminal('read -p "Proton username: " username && {protonvpn} signin "$username"')
     elif words[0] == "account":
         current = account()
         if "--json" in flags:

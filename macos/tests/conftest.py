@@ -6,7 +6,7 @@ import types
 import pytest
 
 # Imported up front, before the guard below: Proton's modules run a command or two at import time.
-from proton.vpn.macos import cli, vpn, wireguard  # noqa: F401
+from proton.vpn.macos import cli, privileged, vpn, wireguard  # noqa: F401
 
 
 @pytest.fixture(autouse=True)
@@ -18,6 +18,12 @@ def no_real_commands(monkeypatch):
     monkeypatch.setattr(subprocess, "run", refuse)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", refuse)
     monkeypatch.setattr("os.execv", refuse)
+
+
+@pytest.fixture(autouse=True)
+def no_tools(tmp_path, monkeypatch):
+    """No root-owned copies of the tools, so none are out of date, unless a test makes some."""
+    monkeypatch.setattr(privileged, "TOOLS", tmp_path / "tools")
 
 
 KEEP_WATCHING = vpn.keep_watching
