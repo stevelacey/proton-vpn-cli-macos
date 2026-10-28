@@ -364,7 +364,7 @@ def account():
     if not api.is_user_logged_in():
         return None
     # Tier 0 is Proton Free, which can only connect to the fastest free server.
-    return {"username": api.account_name, "plan": api.account_data.plan_title, "tier": api.account_data.max_tier}
+    return {"username": api.account_name, "plan": api.account_data.plan_title or "Free", "tier": api.account_data.max_tier}
 
 
 def signin_from_stdin():

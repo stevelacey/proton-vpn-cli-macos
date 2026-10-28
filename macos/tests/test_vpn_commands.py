@@ -275,6 +275,9 @@ def test_account(monkeypatch):
     monkeypatch.setattr(api, "ProtonVPNAPI", FakeAPI)
     monkeypatch.setattr(api, "ClientTypeMetadata", lambda **kw: kw)
     assert vpn.account() == {"username": "steve", "plan": "Plus", "tier": 2}
+    # Proton Free has no plan title.
+    monkeypatch.setattr(FakeAPI, "account_data", types.SimpleNamespace(plan_title=None, max_tier=0))
+    assert vpn.account() == {"username": "steve", "plan": "Free", "tier": 0}
     FakeAPI.logged_in = False
     assert vpn.account() is None
 
