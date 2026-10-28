@@ -14,8 +14,11 @@ from pathlib import Path
 from typing import Optional
 
 HELPER = Path("/usr/local/libexec/proton-vpn-cli-macos-helper")
+# Root-owned copies of what the helper runs, since Homebrew's files can be changed by anything running as you.
+TOOLS = Path("/usr/local/libexec/proton-vpn-cli-macos")
 SUDOERS = Path("/etc/sudoers.d/proton-vpn-cli-macos")
 SOURCE = Path(__file__).with_name("helper.sh")
+HOMEBREW = "/opt/homebrew/bin:/usr/local/bin"
 
 
 def command(*args: str) -> list[str]:
@@ -67,7 +70,15 @@ def setup(user: Optional[str] = None):
             sys.exit(1)
         return
 
+    found = {tool: shutil.which(tool, path=HOMEBREW) for tool in ("wg-quick", "wg", "wireguard-go", "bash")}
+    if not all(found.values()):
+        sys.exit("protonvpn: setup needs Homebrew's wireguard-tools, wireguard-go and bash: "
+                 "brew install wireguard-tools wireguard-go bash")
     HELPER.parent.mkdir(parents=True, exist_ok=True)
+    unsafe = writable_by_others(HELPER.parent)
+    if unsafe:
+        sys.exit(f"protonvpn: {unsafe} can be changed by users other than root, so the helper can't go in it")
+    install_tools(found)
     shutil.copyfile(SOURCE, HELPER)
     os.chown(HELPER, 0, 0)
     os.chmod(HELPER, 0o755)
@@ -81,8 +92,65 @@ def setup(user: Optional[str] = None):
     os.chown(file.name, 0, 0)
     os.chmod(file.name, 0o440)
     shutil.move(file.name, SUDOERS)
-
-    missing = [tool for tool in ("wg-quick", "wireguard-go") if not shutil.which(tool, path="/opt/homebrew/bin:/usr/local/bin")]
     print(f"Set up: {user} can now connect without a password.")
-    if missing:
-        print(f"Also needed: brew install wireguard-tools bash (missing {', '.join(missing)})")
+
+
+def writable_by_others(path: Path) -> Optional[Path]:
+    """The first of path and its parents that isn't root's alone, if any."""
+    for folder in (path, *path.parents):
+        info = folder.stat()
+        if info.st_uid != 0 or info.st_mode & 0o022:
+            return folder
+    return None
+
+
+def linked_libraries(binary: Path) -> list[str]:
+    """The libraries a binary loads from outside macOS, like Homebrew's readline for its bash."""
+    def otool(flag):
+        output = subprocess.run(["/usr/bin/otool", flag, str(binary)], capture_output=True, text=True, check=True).stdout
+        return [line.split()[0] for line in output.splitlines()[1:] if line.strip()]
+
+    own = otool("-D")
+    return [library for library in otool("-L")
+            if library not in own and not library.startswith(("/usr/lib/", "/System/", "@"))]
+
+
+def install_tools(found: dict[str, str]):
+    """
+    Copies wg-quick and what it runs (wg, wireguard-go, and bash with the libraries it loads) into
+    TOOLS for the helper, so running it as root never runs a file your account can change.
+    Running setup again copies Homebrew's latest.
+    """
+    staging = TOOLS.with_name(TOOLS.name + ".new")
+    shutil.rmtree(staging, ignore_errors=True)
+    (staging / "lib").mkdir(parents=True)
+    for tool, path in found.items():
+        shutil.copyfile(os.path.realpath(path), staging / tool)
+
+    # bash's libraries go in lib, and everything that loads them is pointed there, then signed again.
+    pending, changed = [staging / "bash"], []
+    while pending:
+        binary = pending.pop()
+        for library in linked_libraries(binary):
+            name = os.path.basename(library)
+            copy = staging / "lib" / name
+            if not copy.exists():
+                shutil.copyfile(os.path.realpath(library), copy)
+                subprocess.run(["/usr/bin/install_name_tool", "-id", f"@executable_path/lib/{name}", str(copy)],
+                               capture_output=True, check=True)
+                pending.append(copy)
+                changed.append(copy)
+            subprocess.run(["/usr/bin/install_name_tool", "-change", library, f"@executable_path/lib/{name}",
+                            str(binary)], capture_output=True, check=True)
+        changed.append(binary)
+    for binary in dict.fromkeys(changed):
+        subprocess.run(["/usr/bin/codesign", "--force", "--sign", "-", str(binary)], capture_output=True, check=True)
+
+    for folder, _, files in os.walk(staging):
+        os.chown(folder, 0, 0)
+        os.chmod(folder, 0o755)
+        for name in files:
+            os.chown(os.path.join(folder, name), 0, 0)
+            os.chmod(os.path.join(folder, name), 0o644 if folder.endswith("lib") else 0o755)
+    shutil.rmtree(TOOLS, ignore_errors=True)
+    staging.rename(TOOLS)

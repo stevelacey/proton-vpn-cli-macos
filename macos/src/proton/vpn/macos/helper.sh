@@ -2,7 +2,8 @@
 # The few things Proton VPN CLI for macOS needs root for. `protonvpn setup` installs this root-owned and
 # lets its user run it through sudo without a password, so it takes no paths or commands: a tunnel
 # config comes in on stdin and is only used if it's a plain WireGuard config, since wg-quick runs
-# PreUp/PostUp lines as root.
+# PreUp/PostUp lines as root. It only runs macOS's own commands and the root-owned copies of wg-quick,
+# wg, wireguard-go and bash that setup makes, never Homebrew's, which its user can change.
 #
 #   helper up           brings the tunnel up with the config on stdin
 #   helper down         brings it down
@@ -14,8 +15,9 @@
 #   helper version
 set -euo pipefail
 
-VERSION=1
-PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+VERSION=2
+tools=/usr/local/libexec/proton-vpn-cli-macos
+PATH=$tools:/usr/bin:/bin:/usr/sbin:/sbin
 export PATH
 dir=/var/run/proton-vpn
 conf=$dir/proton.conf
@@ -36,10 +38,10 @@ case "${1:-}" in
     mkdir -p "$dir"
     chmod 700 "$dir"
     (umask 077 && printf '%s\n' "$config" > "$conf")
-    exec bash wg-quick up "$conf"
+    exec "$tools/bash" "$tools/wg-quick" up "$conf"
     ;;
   down)
-    exec bash wg-quick down "$conf"
+    exec "$tools/bash" "$tools/wg-quick" down "$conf"
     ;;
   pf-load)
     exec pfctl -a "$anchor" -f -

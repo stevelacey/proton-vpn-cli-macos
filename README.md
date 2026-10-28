@@ -26,6 +26,9 @@ protonvpn setup
 `protonvpn setup` asks for your Mac password once, so connecting doesn't need it again, then signs
 you in to your Proton account. Connecting needs root for `wg-quick`, `pfctl` and `networksetup`;
 setup installs a small root-owned helper that only does those, and only takes plain WireGuard configs.
+It also copies `wg-quick`, `wg`, `wireguard-go` and `bash` from Homebrew into a root-owned folder, since
+anything running as you can change Homebrew's files; the helper only runs those copies and macOS's own
+commands. Run `protonvpn setup` again to pick up Homebrew updates to them.
 
 Or install it with `uv tool install proton-vpn-cli-macos` (or pipx), plus `brew install wireguard-tools bash`.
 
