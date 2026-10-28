@@ -30,7 +30,7 @@ It also copies `wg-quick`, `wg`, `wireguard-go` and `bash` from Homebrew into a 
 anything running as you can change Homebrew's files; the helper only runs those copies and macOS's own
 commands. Run `protonvpn setup` again to pick up Homebrew updates to them.
 
-Or install it with `uv tool install proton-vpn-cli-macos` (or pipx), plus `brew install wireguard-tools bash`.
+Or install it with `uv tool install proton-vpn-cli-macos` (or pipx), plus `brew install wireguard-tools bash gnupg`.
 
 ## Use
 
@@ -80,7 +80,7 @@ protonvpn connect --help
 ```sh
 git clone --recurse-submodules=macos/vendor git@github.com:stevelacey/proton-vpn-cli-macos.git
 cd proton-vpn-cli-macos/macos
-brew install rust wireguard-tools bash
+brew install rust wireguard-tools bash gnupg
 scripts/build-platform
 uv sync
 uv run pytest
