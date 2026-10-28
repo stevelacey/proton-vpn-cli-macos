@@ -18,7 +18,8 @@
   protonvpn signin <username>  sign in; protonvpn signout signs out
   protonvpn ip                 the IP address sites see, while connected
   protonvpn port               the forwarded port, while port forwarding's on
-  protonvpn forward            keep the forwarded port alive (started for you, in the background)
+  protonvpn watch              reconnect when the connection dies and keep the forwarded port alive
+                               (started for you, in the background)
 
 Proton's own commands work too: connect, disconnect, status, servers, countries, cities, config,
 signin, signout and info (protonvpn <command> --help). Status and the country list are read from
@@ -43,7 +44,8 @@ SERVER_LIST = CACHE / "serverlist.json"
 CONNECTION = CACHE / "connection" / "connection_persistence.json"
 EXIT_IP = CACHE / "connection" / "exit_ip"
 WG_CONFIG = CACHE / "connection" / "proton.conf"
-NAT_PMP_GATEWAY = "10.2.0.1"
+# Proton's server at the far end of the tunnel, which answers NAT-PMP and DNS.
+TUNNEL_GATEWAY = "10.2.0.1"
 
 # DNS choices besides Proton's own.
 DNS_PROVIDERS = {
@@ -446,7 +448,7 @@ def nat_pmp_map(protocol, lifetime=60):
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
         sock.settimeout(3)
         # Version 0, opcode, reserved, internal port 0 (Proton maps it 1:1), suggested port 0, lifetime.
-        sock.sendto(struct.pack("!BBHHHI", 0, opcode, 0, 0, 0, lifetime), (NAT_PMP_GATEWAY, 5351))
+        sock.sendto(struct.pack("!BBHHHI", 0, opcode, 0, 0, 0, lifetime), (TUNNEL_GATEWAY, 5351))
         data, _ = sock.recvfrom(16)
     _, _, result, _, _, external, _ = struct.unpack("!BBHIHHI", data)
     if result:
@@ -459,53 +461,120 @@ def forwarding(current):
     return current["state"] == "Connected" and current.get("p2p", True) and settings()["port_forwarding"]
 
 
-def forward():
-    """
-    Keeps the forwarded port alive while connected with port forwarding on.
+def watched_path():
+    import tempfile  # pylint: disable=import-outside-toplevel
+    return Path(tempfile.gettempdir(), "Proton", "VPN", "watching")
 
-    Proton's server hands out the port for 60 seconds at a time; its CLI only
-    renews it while it's running, i.e. while connecting. keep_port_forwarded
-    has launchd run this in the background.
+
+def similar_server(dead):
     """
+    The least busy server like one that's gone down: in the same country, with the same Secure Core,
+    Tor and P2P, on the same plan or a lower one, preferring its city.
+    """
+    found = next((logical for logical in logicals() if logical.get("Name") == dead), None)
+    if not found:
+        return None
+    modes = SECURE_CORE_FEATURE | TOR_FEATURE | P2P_FEATURE
+    candidates = [
+        logical for logical in logicals()
+        if logical.get("Name") != dead and logical.get("Status", 1)
+        and logical.get("ExitCountry") == found.get("ExitCountry")
+        and logical.get("Features", 0) & modes == found.get("Features", 0) & modes
+        and logical.get("Tier", 0) <= found.get("Tier", 0)
+    ]
+    candidates.sort(key=lambda logical: (logical.get("City") != found.get("City"), logical.get("Score", 0)))
+    return candidates[0]["Name"] if candidates else None
+
+
+def network_up():
+    """Whether the Mac has a network to reconnect over: a default route, which the tunnel doesn't replace."""
+    import subprocess  # pylint: disable=import-outside-toplevel
+    return subprocess.run(["/sbin/route", "-n", "get", "default"], capture_output=True, check=False).returncode == 0
+
+
+def reconnect(current):
+    """Connects to another server like the one whose tunnel has died, which is usually down."""
+    from proton.vpn.macos.cli import locked  # pylint: disable=import-outside-toplevel
+    with locked():
+        # Something else may have connected or disconnected while this waited its turn.
+        latest = status()
+        if latest["state"] not in ("Connected", "Dropped") or latest.get("server") != current["server"] \
+                or tunnel_alive():
+            return
+        server = similar_server(current["server"])
+        print(f"The connection to {current['server']} stopped working; connecting to "
+              f"{server or current.get('country') or 'the fastest server'}", flush=True)
+        if server:
+            run_protonvpn("connect", server)
+        else:
+            run_protonvpn("connect", *(["--country", current["code"]] if current.get("code") else []))
+
+
+def forward_port():
+    """Renews the forwarded port, returning how long to wait before renewing it again."""
     path = forwarded_port_path()
-    while forwarding(status()):
-        # Renews well inside the minute; tries again soon if the server isn't handing out ports
-        # yet, e.g. just after port forwarding is turned on.
-        wait = 45
-        try:
-            port = nat_pmp_map("udp")
-            nat_pmp_map("tcp")
-            path.parent.mkdir(parents=True, exist_ok=True)
-            if not path.exists() or path.read_text().strip() != str(port):
-                # Replaced rather than rewritten, which tells anything watching its folder, like the menu bar app.
-                new = path.with_name(path.name + ".new")
-                new.write_text(str(port))
-                new.replace(path)
-                print(f"Forwarded port {port}", flush=True)
-            else:
-                # Shows it's being renewed, for status to restart it when it isn't.
-                os.utime(path)
-        except OSError as exc:
-            print(f"protonvpn: couldn't renew the forwarded port: {exc}", file=sys.stderr, flush=True)
-            wait = 2
-        time.sleep(wait)
-    # Disconnected or turned off, so the port's no longer forwarded.
-    path.unlink(missing_ok=True)
+    try:
+        port = nat_pmp_map("udp")
+        nat_pmp_map("tcp")
+    except OSError as exc:
+        # Tries again soon, e.g. just after port forwarding's turned on, before the server hands out ports.
+        print(f"protonvpn: couldn't renew the forwarded port: {exc}", file=sys.stderr, flush=True)
+        return 2
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists() or path.read_text().strip() != str(port):
+        # Replaced rather than rewritten, which tells anything watching its folder, like the menu bar app.
+        new = path.with_name(path.name + ".new")
+        new.write_text(str(port))
+        new.replace(path)
+        print(f"Forwarded port {port}", flush=True)
+    else:
+        os.utime(path)
+    # Well inside the minute the server hands it out for.
+    return 45
 
 
-FORWARDER = "com.steve.protonvpn.forward"
-
-
-def keep_port_forwarded():
+def watch():
     """
-    Has launchd run `protonvpn forward` in the background while connected with port forwarding
-    on, from a LaunchAgent added the first time it's needed. It stops by itself when it's done.
+    Looks after the connection in the background, which Proton's apps do while they're open and
+    its CLI can't: reconnects when the tunnel stops carrying traffic, say when its server goes down,
+    and keeps the forwarded port alive, since Proton's server only hands it out for 60 seconds at a
+    time. keep_watching has launchd run this; it stops when disconnected.
     """
-    if not forwarding(status()):
+    heartbeat = watched_path()
+    heartbeat.parent.mkdir(parents=True, exist_ok=True)
+    failures, renew_at = 0, 0.0
+    while (current := status())["state"] in ("Connected", "Dropped"):
+        # Shows it's running, for status to restart it when it isn't.
+        heartbeat.touch()
+        failures = 0 if current["state"] == "Connected" and tunnel_alive() else failures + 1
+        if failures >= 3 and network_up():
+            reconnect(current)
+            failures, renew_at = 0, 0.0
+            continue
+        if forwarding(current):
+            if time.time() >= renew_at:
+                renew_at = time.time() + forward_port()
+        else:
+            forwarded_port_path().unlink(missing_ok=True)
+            renew_at = 0.0
+        time.sleep(5)
+    forwarded_port_path().unlink(missing_ok=True)
+    heartbeat.unlink(missing_ok=True)
+
+
+WATCHER = "com.steve.protonvpn.watch"
+
+
+def keep_watching():
+    """
+    Has launchd run `protonvpn watch` in the background while connected, from a LaunchAgent
+    added the first time it's needed. It stops by itself when disconnected.
+    """
+    if status()["state"] != "Connected":
         return
     import plistlib  # pylint: disable=import-outside-toplevel
     import subprocess  # pylint: disable=import-outside-toplevel
-    agent = Path.home() / "Library" / "LaunchAgents" / f"{FORWARDER}.plist"
+    agent = Path.home() / "Library" / "LaunchAgents" / f"{WATCHER}.plist"
     domain = f"gui/{os.getuid()}"
     try:
         program = plistlib.loads(agent.read_bytes())["ProgramArguments"][0]
@@ -514,12 +583,12 @@ def keep_port_forwarded():
     if not program or not os.path.exists(program):
         command = [COMMAND] if os.path.basename(COMMAND) == "protonvpn" \
             else [sys.executable, "-m", "proton.vpn.macos.vpn"]
-        subprocess.run(["/bin/launchctl", "bootout", f"{domain}/{FORWARDER}"], capture_output=True, check=False)
+        subprocess.run(["/bin/launchctl", "bootout", f"{domain}/{WATCHER}"], capture_output=True, check=False)
         agent.parent.mkdir(parents=True, exist_ok=True)
-        agent.write_bytes(plistlib.dumps({"Label": FORWARDER, "ProgramArguments": [*command, "forward"]}))
+        agent.write_bytes(plistlib.dumps({"Label": WATCHER, "ProgramArguments": [*command, "watch"]}))
     # Loading it again, or starting it while it runs, does nothing.
     subprocess.run(["/bin/launchctl", "bootstrap", domain, str(agent)], capture_output=True, check=False)
-    subprocess.run(["/bin/launchctl", "kickstart", f"{domain}/{FORWARDER}"], capture_output=True, check=False)
+    subprocess.run(["/bin/launchctl", "kickstart", f"{domain}/{WATCHER}"], capture_output=True, check=False)
 
 
 def report_forwarded_port(timeout=30):
@@ -536,14 +605,42 @@ def report_forwarded_port(timeout=30):
     print("protonvpn: no forwarded port yet; protonvpn status shows it when there is one")
 
 
-def renew_stalled_forwarding(current):
-    """Restarts forwarding when the port hasn't been renewed in over a minute, say after a crash."""
+def renew_stalled_watching(current):
+    """Restarts watching when it's stopped checking in, say after a crash."""
     try:
-        stalled = time.time() - forwarded_port_path().stat().st_mtime > 90
+        stalled = time.time() - watched_path().stat().st_mtime > 60
     except OSError:
         stalled = True
-    if stalled and forwarding(current):
-        keep_port_forwarded()
+    if stalled and current["state"] == "Connected":
+        keep_watching()
+
+
+def tunnel_alive(attempts=2):
+    """Whether traffic gets through the tunnel: Proton's DNS server at its far end answers."""
+    import socket  # pylint: disable=import-outside-toplevel
+    import struct  # pylint: disable=import-outside-toplevel
+    # A query for proton.me's address.
+    query = struct.pack("!HHHHHH", 0x5052, 0x0100, 1, 0, 0, 0) + b"\x06proton\x02me\x00" + struct.pack("!HH", 1, 1)
+    for _ in range(attempts):
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.settimeout(2)
+            try:
+                sock.sendto(query, (TUNNEL_GATEWAY, 53))
+                sock.recvfrom(512)
+                return True
+            except OSError:
+                pass
+    return False
+
+
+def drop_dead_tunnel():
+    """
+    Disconnects a connection that's stopped carrying traffic, say when its server goes down,
+    before connecting again: Proton's CLI updates the server list first, which over a dead
+    tunnel waits out its timeouts.
+    """
+    if status()["state"] == "Connected" and not tunnel_alive():
+        run_protonvpn("disconnect")
 
 
 def describe(s):
@@ -572,9 +669,11 @@ def protonvpn(*args):
     cli.install()
     from proton.vpn.cli import main as cli_main  # pylint: disable=import-outside-toplevel
     with cli.locked():
+        if args and args[0] == "connect":
+            drop_dead_tunnel()
         cli_main(allow_concurrency=True, cli_args=list(args))
     if args and args[0] in ("connect", "config"):
-        keep_port_forwarded()
+        keep_watching()
 
 
 def connect(args):
@@ -769,7 +868,7 @@ def main(argv=None):
     elif not words or words[0] == "status":
         current = status()
         print(json.dumps(current) if "--json" in flags else describe(current))
-        renew_stalled_forwarding(current)
+        renew_stalled_watching(current)
     elif words[0] in ("off", "disconnect", "down"):
         if status()["state"] == "Disconnected":
             print("Already disconnected")
@@ -803,8 +902,8 @@ def main(argv=None):
         protonvpn("signout")
     elif words[0] == "dns" and len(words) == 2:
         set_dns(words[1].lower())
-    elif words[0] == "forward":
-        forward()
+    elif words[0] == "watch":
+        watch()
     elif words[0] == "ip":
         current = status()
         if current["state"] != "Connected" or not current.get("ip"):

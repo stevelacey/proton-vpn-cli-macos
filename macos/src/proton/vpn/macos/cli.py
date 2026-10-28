@@ -101,7 +101,7 @@ PORT_FORWARDING_HOW_IT_WORKS = """How It Works:
 def _explain_port_forwarding():
     """
     Proton's CLI says to keep the forwarded port with a natpmpc script from its Linux guide;
-    here `protonvpn forward` keeps it in the background, so its messages point to status instead.
+    here `protonvpn watch` keeps it in the background, so its messages point to status instead.
     """
     # pylint: disable=import-outside-toplevel,protected-access
     import click
@@ -177,12 +177,14 @@ def main():
     command = next((arg for arg in sys.argv[1:] if not arg.startswith("-")), None)
     if command == "connect" and not {"--help", "-h"} & set(sys.argv):
         privileged.ensure_set_up()
+    from proton.vpn.macos import vpn  # pylint: disable=import-outside-toplevel
     with contextlib.nullcontext() if command in READ_ONLY_COMMANDS else locked():
+        if command == "connect" and not {"--help", "-h"} & set(sys.argv):
+            vpn.drop_dead_tunnel()
         # Skips the check for Proton's Linux GUI over D-Bus.
         cli_main(allow_concurrency=True)
     if command in ("connect", "config"):
-        from proton.vpn.macos import vpn  # pylint: disable=import-outside-toplevel
-        vpn.keep_port_forwarded()
+        vpn.keep_watching()
 
 
 if __name__ == "__main__":  # pragma: no cover

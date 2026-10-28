@@ -62,9 +62,13 @@ protonvpn connect --help
 - Connections are WireGuard, through `wg-quick`, with the local agent confirming each one and
   applying NetShield, port forwarding and the rest.
 - The kill switch is pf rules in their own anchor; `/etc/pf.conf` is left alone.
-- Proton's server only forwards a port for a minute at a time, so with port forwarding on, a LaunchAgent
-  runs `protonvpn forward` in the background to keep renewing it. It's added the first time you use
-  port forwarding, and stops by itself when you disconnect or turn it off.
+- While you're connected, a LaunchAgent runs `protonvpn watch` in the background, as Proton's apps
+  do while they're open. If the tunnel stops carrying traffic, say when its server goes down, it
+  reconnects to a similar server. It also keeps renewing the forwarded port, which Proton's server
+  only hands out for a minute at a time. It's added the first time you connect, and stops by itself
+  when you disconnect.
+- Switching servers over a dead tunnel disconnects it first, rather than waiting out Proton's API
+  timeouts through it.
 - Sign-in is kept in the macOS Keychain.
 - The release wheel includes the core libraries (`macos/vendor`) and the Rust extension.
 

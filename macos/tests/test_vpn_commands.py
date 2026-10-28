@@ -140,17 +140,17 @@ def test_main_help(capsys, argv):
     assert capsys.readouterr().out.startswith("Proton VPN on macOS: Proton's CLI, plus short commands")
 
 
-def test_main_dispatches_set_dns_and_forward(monkeypatch):
+def test_main_dispatches_set_dns_and_watch(monkeypatch):
     calls = []
     monkeypatch.setattr(vpn, "set_dns", lambda choice: calls.append(("dns", choice)))
     monkeypatch.setattr(vpn, "set_setting", lambda name, value: calls.append((name, value)))
-    monkeypatch.setattr(vpn, "forward", lambda: calls.append("forward"))
+    monkeypatch.setattr(vpn, "watch", lambda: calls.append("watch"))
     monkeypatch.setattr(vpn, "signin_from_stdin", lambda: calls.append("signin"))
     vpn.main(["dns", "Google"])
     vpn.main(["set", "netshield", "off"])
-    vpn.main(["forward"])
+    vpn.main(["watch"])
     vpn.main(["signin", "--stdin"])
-    assert calls == [("dns", "google"), ("netshield", "off"), "forward", "signin"]
+    assert calls == [("dns", "google"), ("netshield", "off"), "watch", "signin"]
 
 
 def test_main_servers(server_list, capsys):
@@ -248,12 +248,14 @@ def test_protonvpn_runs_proton_cli_locked(monkeypatch):
     monkeypatch.setattr(cli, "locked", lambda: contextlib.nullcontext(events.append("locked")))
     monkeypatch.setattr(proton.vpn.cli, "main", lambda **kw: events.append(kw))
     monkeypatch.setattr(sys, "argv", ["vpn"])
-    monkeypatch.setattr(vpn, "keep_port_forwarded", lambda: events.append("forward"))
+    monkeypatch.setattr(vpn, "keep_watching", lambda: events.append("watch"))
+    monkeypatch.setattr(vpn, "drop_dead_tunnel", lambda: events.append("drop"))
     vpn.protonvpn("connect", "--p2p")
-    assert events == ["install", "locked", {"allow_concurrency": True, "cli_args": ["connect", "--p2p"]}, "forward"]
+    assert events == ["install", "locked", "drop", {"allow_concurrency": True, "cli_args": ["connect", "--p2p"]},
+                      "watch"]
     events.clear()
     vpn.protonvpn("signout")
-    assert "forward" not in events
+    assert "watch" not in events and "drop" not in events
     assert sys.argv[0] == "protonvpn"
 
 
@@ -300,7 +302,7 @@ class FakeSocket:
         FakeSocket.sent.append((data, address))
 
     def recvfrom(self, _size):
-        return FakeSocket.reply, (vpn.NAT_PMP_GATEWAY, 5351)
+        return FakeSocket.reply, (vpn.TUNNEL_GATEWAY, 5351)
 
 
 def test_nat_pmp_map(monkeypatch):
@@ -324,55 +326,218 @@ class StopLoop(Exception):
     pass
 
 
-def test_forward_writes_the_port_and_keeps_renewing(files, monkeypatch, tmp_path, capsys):
-    monkeypatch.setattr(vpn, "status", lambda: {"state": "Connected"})
+@pytest.fixture
+def watching(files, monkeypatch):
+    """A connection to watch: alive, with port forwarding on, and sleeps recorded."""
+    monkeypatch.setattr(vpn, "status", lambda: {"state": "Connected", "server": "CH#1"})
     monkeypatch.setattr(vpn, "settings", lambda: {"port_forwarding": True})
+    monkeypatch.setattr(vpn, "tunnel_alive", lambda: True)
     monkeypatch.setattr(vpn, "nat_pmp_map", lambda protocol: 4242)
     sleeps = []
+    monkeypatch.setattr(vpn.time, "sleep", sleeps.append)
+    return sleeps
 
+
+def stop_after(monkeypatch, count, sleeps):
+    """Has sleep stop watch's loop after it's slept count times."""
     def sleep(seconds):
         sleeps.append(seconds)
-        if len(sleeps) == 2:
+        if len(sleeps) == count:
             raise StopLoop
-
     monkeypatch.setattr(vpn.time, "sleep", sleep)
+
+
+def test_watch_writes_the_port_and_renews_it_well_inside_the_minute(watching, monkeypatch, tmp_path, capsys):
+    clock = iter([0, 0, 5, 10, 45, 45])
+    monkeypatch.setattr(vpn.time, "time", lambda: next(clock))
+    renewals = []
+    monkeypatch.setattr(vpn, "forward_port", lambda: renewals.append("renew") or 45)
+    stop_after(monkeypatch, 4, watching)
     with pytest.raises(StopLoop):
-        vpn.forward()
+        vpn.watch()
+    assert renewals == ["renew", "renew"]
+    assert watching == [5, 5, 5, 5]
+    assert (tmp_path / "watching").exists()
+
+
+def test_watch_stops_when_disconnected_and_clears_its_files(watching, monkeypatch, tmp_path):
+    states = iter([{"state": "Connected", "server": "CH#1"}, {"state": "Disconnected"}])
+    monkeypatch.setattr(vpn, "status", lambda: next(states))
+    vpn.watch()
+    assert watching == [5]
+    assert not (tmp_path / "forwarded_port").exists()
+    assert not (tmp_path / "watching").exists()
+
+
+def test_watch_clears_the_port_when_forwarding_stops(watching, monkeypatch, tmp_path):
+    states = iter([{"state": "Connected", "server": "CH#1", "p2p": False}, {"state": "Disconnected"}])
+    monkeypatch.setattr(vpn, "status", lambda: next(states))
+    monkeypatch.setattr(vpn, "forward_port", lambda: pytest.fail("not a P2P server"))
+    (tmp_path / "forwarded_port").write_text("4242")
+    vpn.watch()
+    assert not (tmp_path / "forwarded_port").exists()
+
+
+def test_watch_reconnects_after_three_failed_checks(watching, monkeypatch):
+    monkeypatch.setattr(vpn, "tunnel_alive", lambda: False)
+    monkeypatch.setattr(vpn, "settings", lambda: {"port_forwarding": False})
+    monkeypatch.setattr(vpn, "network_up", lambda: True)
+    reconnects = []
+    monkeypatch.setattr(vpn, "reconnect", reconnects.append)
+    stop_after(monkeypatch, 4, watching)
+    with pytest.raises(StopLoop):
+        vpn.watch()
+    # Fails twice, reconnects on the third, then counts again from nothing.
+    assert reconnects == [{"state": "Connected", "server": "CH#1"}]
+
+
+def test_watch_reconnects_a_dropped_tunnel_and_waits_for_a_network(watching, monkeypatch):
+    monkeypatch.setattr(vpn, "status", lambda: {"state": "Dropped", "server": "CH#1"})
+    monkeypatch.setattr(vpn, "tunnel_alive", lambda: pytest.fail("no tunnel to check"))
+    networks = iter([False, True])
+    monkeypatch.setattr(vpn, "network_up", lambda: next(networks))
+    reconnects = []
+    monkeypatch.setattr(vpn, "reconnect", reconnects.append)
+    stop_after(monkeypatch, 4, watching)
+    with pytest.raises(StopLoop):
+        vpn.watch()
+    assert len(reconnects) == 1
+
+
+def test_forward_port_writes_a_new_port(files, monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(vpn, "nat_pmp_map", lambda protocol: 4242)
+    assert vpn.forward_port() == 45
     assert (tmp_path / "forwarded_port").read_text() == "4242"
     assert capsys.readouterr().out == "Forwarded port 4242\n"
-    assert sleeps == [45, 45]
 
 
-def test_forward_reports_errors_and_stops_when_disconnected(files, monkeypatch, capsys):
-    states = iter([{"state": "Connected"}, {"state": "Dropped"}])
-    monkeypatch.setattr(vpn, "status", lambda: next(states))
-    monkeypatch.setattr(vpn, "settings", lambda: {"port_forwarding": True})
-
-    def refuse(protocol):
-        raise OSError("timed out")
-
-    monkeypatch.setattr(vpn, "nat_pmp_map", refuse)
-    sleeps = []
-    monkeypatch.setattr(vpn.time, "sleep", sleeps.append)
-    vpn.forward()
-    assert "couldn't renew the forwarded port: timed out" in capsys.readouterr().err
-    assert sleeps == [2]
-
-
-def test_forward_renews_the_same_port_and_clears_it_when_done(files, monkeypatch, tmp_path, capsys):
-    states = iter([{"state": "Connected"}, {"state": "Connected", "p2p": False}])
-    monkeypatch.setattr(vpn, "status", lambda: next(states))
-    monkeypatch.setattr(vpn, "settings", lambda: {"port_forwarding": True})
+def test_forward_port_touches_the_same_port(files, monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(vpn, "nat_pmp_map", lambda protocol: 4242)
     port = tmp_path / "forwarded_port"
     port.write_text("4242")
     os.utime(port, (0, 0))
-    seen = []
-    monkeypatch.setattr(vpn.time, "sleep", lambda seconds: seen.append(port.stat().st_mtime))
-    vpn.forward()
-    assert seen[0] > 0
+    vpn.forward_port()
+    assert port.stat().st_mtime > 0
     assert capsys.readouterr().out == ""
-    assert not port.exists()
+
+
+def test_forward_port_tries_again_soon_after_an_error(files, monkeypatch, capsys):
+    def refuse(protocol):
+        raise OSError("timed out")
+
+    monkeypatch.setattr(vpn, "nat_pmp_map", refuse)
+    assert vpn.forward_port() == 2
+    assert "couldn't renew the forwarded port: timed out" in capsys.readouterr().err
+
+
+class FakeDNS(FakeSocket):
+    replies = []
+
+    def recvfrom(self, _size):
+        reply = FakeDNS.replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply, (vpn.TUNNEL_GATEWAY, 53)
+
+
+def test_tunnel_alive_asks_protons_dns_at_the_far_end(monkeypatch):
+    monkeypatch.setattr(socket, "socket", FakeDNS)
+    FakeDNS.replies = [TimeoutError(), b"answer"]
+    assert vpn.tunnel_alive()
+    data, address = FakeSocket.sent[-1]
+    assert address == ("10.2.0.1", 53)
+    assert b"\x06proton\x02me\x00" in data
+    FakeDNS.replies = [TimeoutError(), TimeoutError()]
+    assert not vpn.tunnel_alive()
+
+
+def test_drop_dead_tunnel(dead_tunnel_check, monkeypatch):
+    calls = []
+    monkeypatch.setattr(vpn, "run_protonvpn", lambda *args: calls.append(args))
+    monkeypatch.setattr(vpn, "status", lambda: {"state": "Connected"})
+    monkeypatch.setattr(vpn, "tunnel_alive", lambda: True)
+    vpn.drop_dead_tunnel()
+    assert calls == []
+    monkeypatch.setattr(vpn, "tunnel_alive", lambda: False)
+    vpn.drop_dead_tunnel()
+    assert calls == [("disconnect",)]
+    monkeypatch.setattr(vpn, "status", lambda: {"state": "Disconnected"})
+    vpn.drop_dead_tunnel()
+    assert calls == [("disconnect",)]
+
+
+def test_similar_server(server_list):
+    servers = json.loads((server_list / "serverlist.json").read_text())
+    servers["LogicalServers"] += [
+        {"Name": "CH#4", "ExitCountry": "CH", "Features": 0, "City": "Geneva", "Status": 1, "Tier": 2, "Score": 1},
+        {"Name": "CH#5", "ExitCountry": "CH", "Features": 0, "City": "Zurich", "Status": 0, "Tier": 2, "Score": 1},
+        {"Name": "CH#6", "ExitCountry": "CH", "Features": 0, "City": "Zurich", "Status": 1, "Tier": 2, "Score": 3},
+        {"Name": "CH#7", "ExitCountry": "CH", "Features": 0, "City": "Zurich", "Status": 1, "Tier": 2, "Score": 2},
+        {"Name": "CH#8", "ExitCountry": "CH", "Features": 4, "City": "Zurich", "Status": 1, "Tier": 2, "Score": 1},
+        {"Name": "CH-FREE#1", "ExitCountry": "CH", "Features": 0, "City": "Zurich", "Status": 1, "Tier": 0, "Score": 5},
+    ]
+    (server_list / "serverlist.json").write_text(json.dumps(servers))
+    # Same city and modes first, least busy first, never one that's down.
+    assert vpn.similar_server("CH#1") == "CH#7"
+    assert vpn.similar_server("CH#7") == "CH#1"
+    assert vpn.similar_server("CH#4") == "CH#1"
+    # Free servers only get other free servers.
+    assert vpn.similar_server("CH-FREE#1") is None
+    assert vpn.similar_server("CH#2") == "CH#8"
+    assert vpn.similar_server("CH#3") is None
+    assert vpn.similar_server("XX#1") is None
+
+
+def test_network_up(monkeypatch):
+    import subprocess
+    calls = []
+    monkeypatch.setattr(subprocess, "run", lambda args, **kw: calls.append(args) or types.SimpleNamespace(returncode=0))
+    assert vpn.network_up()
+    assert calls == [["/sbin/route", "-n", "get", "default"]]
+
+
+@pytest.fixture
+def reconnecting(monkeypatch):
+    import contextlib
+    from proton.vpn.macos import cli
+    calls = []
+    monkeypatch.setattr(cli, "locked", lambda: contextlib.nullcontext(calls.append("locked")))
+    monkeypatch.setattr(vpn, "run_protonvpn", lambda *args: calls.append(args))
+    monkeypatch.setattr(vpn, "tunnel_alive", lambda: False)
+    return calls
+
+
+def test_reconnect_to_a_similar_server(reconnecting, monkeypatch, capsys):
+    current = {"state": "Connected", "server": "CH#1", "code": "CH", "country": "Switzerland"}
+    monkeypatch.setattr(vpn, "status", lambda: dict(current, load=50))
+    monkeypatch.setattr(vpn, "similar_server", lambda name: "CH#4")
+    vpn.reconnect(current)
+    assert reconnecting == ["locked", ("connect", "CH#4")]
+    assert capsys.readouterr().out == "The connection to CH#1 stopped working; connecting to CH#4\n"
+
+
+def test_reconnect_to_the_country_without_a_similar_server(reconnecting, monkeypatch, capsys):
+    current = {"state": "Dropped", "server": "CH#1", "code": "CH", "country": "Switzerland"}
+    monkeypatch.setattr(vpn, "status", lambda: current)
+    monkeypatch.setattr(vpn, "similar_server", lambda name: None)
+    vpn.reconnect(current)
+    assert reconnecting[1:] == [("connect", "--country", "CH")]
+    assert capsys.readouterr().out.endswith("connecting to Switzerland\n")
+    reconnecting.clear()
+    vpn.reconnect({"state": "Dropped", "server": "CH#1"})
+    assert reconnecting[1:] == [("connect",)]
+
+
+@pytest.mark.parametrize("latest, alive", [
+    ({"state": "Disconnected"}, False),
+    ({"state": "Connected", "server": "SE#1"}, False),
+    ({"state": "Connected", "server": "CH#1"}, True),
+])
+def test_reconnect_leaves_a_connection_that_changed_or_came_back(reconnecting, monkeypatch, latest, alive):
+    monkeypatch.setattr(vpn, "status", lambda: latest)
+    monkeypatch.setattr(vpn, "tunnel_alive", lambda: alive)
+    vpn.reconnect({"state": "Connected", "server": "CH#1"})
+    assert reconnecting == ["locked"]
 
 
 def test_forwarding_needs_a_p2p_connection_with_port_forwarding_on(monkeypatch):
@@ -392,45 +557,44 @@ def launchctl(monkeypatch, tmp_path):
     calls = []
     monkeypatch.setattr(vpn.Path, "home", lambda: tmp_path)
     monkeypatch.setattr(subprocess, "run", lambda args, **kw: calls.append(args[1:]))
-    monkeypatch.setattr(vpn, "status", lambda: {"state": "Connected", "p2p": True})
-    monkeypatch.setattr(vpn, "settings", lambda: {"port_forwarding": True})
+    monkeypatch.setattr(vpn, "status", lambda: {"state": "Connected"})
     return calls
 
 
 def agent(tmp_path):
     import plistlib
-    return plistlib.loads((tmp_path / "Library" / "LaunchAgents" / f"{vpn.FORWARDER}.plist").read_bytes())
+    return plistlib.loads((tmp_path / "Library" / "LaunchAgents" / f"{vpn.WATCHER}.plist").read_bytes())
 
 
-def test_keep_port_forwarded_adds_the_launch_agent_and_starts_it(launchctl, forwarder, monkeypatch, tmp_path):
+def test_keep_watching_adds_the_launch_agent_and_starts_it(launchctl, watcher, monkeypatch, tmp_path):
     command = tmp_path / "bin" / "protonvpn"
     command.parent.mkdir()
     command.touch()
     monkeypatch.setattr(vpn, "COMMAND", str(command))
     domain = f"gui/{os.getuid()}"
-    forwarder()
-    assert agent(tmp_path) == {"Label": vpn.FORWARDER, "ProgramArguments": [str(command), "forward"]}
-    assert launchctl == [["bootout", f"{domain}/{vpn.FORWARDER}"],
-                         ["bootstrap", domain, str(tmp_path / "Library" / "LaunchAgents" / f"{vpn.FORWARDER}.plist")],
-                         ["kickstart", f"{domain}/{vpn.FORWARDER}"]]
+    watcher()
+    assert agent(tmp_path) == {"Label": vpn.WATCHER, "ProgramArguments": [str(command), "watch"]}
+    assert launchctl == [["bootout", f"{domain}/{vpn.WATCHER}"],
+                         ["bootstrap", domain, str(tmp_path / "Library" / "LaunchAgents" / f"{vpn.WATCHER}.plist")],
+                         ["kickstart", f"{domain}/{vpn.WATCHER}"]]
 
     # Then it only starts it, while the command it runs is there.
     launchctl.clear()
     monkeypatch.setattr(vpn, "COMMAND", "/elsewhere/protonvpn")
-    forwarder()
+    watcher()
     assert agent(tmp_path)["ProgramArguments"][0] == str(command)
     assert [call[0] for call in launchctl] == ["bootstrap", "kickstart"]
 
 
-def test_keep_port_forwarded_runs_the_module_without_a_protonvpn_command(launchctl, forwarder, monkeypatch, tmp_path):
+def test_keep_watching_runs_the_module_without_a_protonvpn_command(launchctl, watcher, monkeypatch, tmp_path):
     monkeypatch.setattr(vpn, "COMMAND", "/src/vpn.py")
-    forwarder()
-    assert agent(tmp_path)["ProgramArguments"] == [sys.executable, "-m", "proton.vpn.macos.vpn", "forward"]
+    watcher()
+    assert agent(tmp_path)["ProgramArguments"] == [sys.executable, "-m", "proton.vpn.macos.vpn", "watch"]
 
 
-def test_keep_port_forwarded_only_when_forwarding(launchctl, forwarder, monkeypatch):
-    monkeypatch.setattr(vpn, "settings", lambda: {"port_forwarding": False})
-    forwarder()
+def test_keep_watching_only_while_connected(launchctl, watcher, monkeypatch):
+    monkeypatch.setattr(vpn, "status", lambda: {"state": "Disconnected"})
+    watcher()
     assert launchctl == []
 
 
@@ -459,18 +623,17 @@ def test_report_forwarded_port_only_when_forwarding(files, monkeypatch, capsys):
     assert capsys.readouterr().out == ""
 
 
-def test_renew_stalled_forwarding(files, monkeypatch, tmp_path):
+def test_renew_stalled_watching(files, monkeypatch, tmp_path):
     calls = []
-    monkeypatch.setattr(vpn, "keep_port_forwarded", lambda: calls.append("keep"))
-    monkeypatch.setattr(vpn, "settings", lambda: {"port_forwarding": True})
+    monkeypatch.setattr(vpn, "keep_watching", lambda: calls.append("keep"))
     current = {"state": "Connected"}
-    vpn.renew_stalled_forwarding(current)
-    port = tmp_path / "forwarded_port"
-    port.write_text("4242")
-    vpn.renew_stalled_forwarding(current)
-    os.utime(port, (0, 0))
-    vpn.renew_stalled_forwarding(current)
-    vpn.renew_stalled_forwarding({"state": "Disconnected"})
+    vpn.renew_stalled_watching(current)
+    heartbeat = tmp_path / "watching"
+    heartbeat.touch()
+    vpn.renew_stalled_watching(current)
+    os.utime(heartbeat, (0, 0))
+    vpn.renew_stalled_watching(current)
+    vpn.renew_stalled_watching({"state": "Disconnected"})
     assert calls == ["keep", "keep"]
 
 
@@ -494,7 +657,7 @@ def test_main_port(monkeypatch, capsys):
 
 def test_main_status_restarts_stalled_forwarding(files, monkeypatch):
     calls = []
-    monkeypatch.setattr(vpn, "renew_stalled_forwarding", calls.append)
+    monkeypatch.setattr(vpn, "renew_stalled_watching", calls.append)
     vpn.main(["status"])
     assert calls == [{"state": "Disconnected"}]
 
@@ -507,10 +670,11 @@ def test_set_port_forwarding_on_reports_the_port(files, lock, proton, monkeypatc
     assert calls == ["report"]
 
 
-def test_forwarded_port_path_is_under_the_temp_dir(monkeypatch, tmp_path):
+def test_watchers_files_are_under_the_temp_dir(monkeypatch, tmp_path):
     import tempfile
     monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
     assert vpn.forwarded_port_path() == tmp_path / "Proton" / "VPN" / "forwarded_port"
+    assert vpn.watched_path() == tmp_path / "Proton" / "VPN" / "watching"
 
 
 def fake_pty(monkeypatch, chunks, status=0):

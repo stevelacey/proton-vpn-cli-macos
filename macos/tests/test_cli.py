@@ -94,10 +94,11 @@ def proton_main(home, monkeypatch):
 
 def test_main_locks_commands_that_change_things(proton_main, monkeypatch):
     from proton.vpn.macos import vpn
-    monkeypatch.setattr(vpn, "keep_port_forwarded", lambda: proton_main.append("forward"))
+    monkeypatch.setattr(vpn, "keep_watching", lambda: proton_main.append("watch"))
+    monkeypatch.setattr(vpn, "drop_dead_tunnel", lambda: proton_main.append("drop"))
     monkeypatch.setattr(sys, "argv", ["protonvpn", "connect", "--p2p"])
     cli.main()
-    assert proton_main == ["install", "locked", {"allow_concurrency": True}, "forward"]
+    assert proton_main == ["install", "locked", "drop", {"allow_concurrency": True}, "watch"]
 
 
 def test_main_does_not_lock_read_only_commands(proton_main, monkeypatch):

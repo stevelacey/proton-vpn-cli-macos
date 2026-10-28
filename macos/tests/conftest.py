@@ -17,23 +17,35 @@ def no_real_commands(monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", refuse)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", refuse)
+    monkeypatch.setattr("os.execv", refuse)
 
 
-KEEP_PORT_FORWARDED = vpn.keep_port_forwarded
+KEEP_WATCHING = vpn.keep_watching
+DROP_DEAD_TUNNEL = vpn.drop_dead_tunnel
 
 
 @pytest.fixture(autouse=True)
-def no_forwarding(monkeypatch):
-    """Commands that connect or change settings don't start forwarding unless a test asks; see forwarder."""
-    monkeypatch.setattr(vpn, "keep_port_forwarded", lambda: None)
+def no_watching(monkeypatch):
+    """
+    Commands that connect or change settings don't start watching, or check the tunnel first,
+    unless a test asks; see watcher and dead_tunnel_check.
+    """
+    monkeypatch.setattr(vpn, "keep_watching", lambda: None)
+    monkeypatch.setattr(vpn, "drop_dead_tunnel", lambda: None)
 
 
 @pytest.fixture
-def forwarder(monkeypatch):
-    """The real keep_port_forwarded."""
-    monkeypatch.setattr(vpn, "keep_port_forwarded", KEEP_PORT_FORWARDED)
-    return KEEP_PORT_FORWARDED
-    monkeypatch.setattr("os.execv", refuse)
+def watcher(monkeypatch):
+    """The real keep_watching."""
+    monkeypatch.setattr(vpn, "keep_watching", KEEP_WATCHING)
+    return KEEP_WATCHING
+
+
+@pytest.fixture
+def dead_tunnel_check(monkeypatch):
+    """The real drop_dead_tunnel."""
+    monkeypatch.setattr(vpn, "drop_dead_tunnel", DROP_DEAD_TUNNEL)
+    return DROP_DEAD_TUNNEL
 
 
 @pytest.fixture
@@ -48,6 +60,7 @@ def files(tmp_path, monkeypatch):
     monkeypatch.setattr(vpn, "SETTINGS", tmp_path / "settings.json")
     monkeypatch.setattr(vpn, "FLAGS", None)
     monkeypatch.setattr(vpn, "forwarded_port_path", lambda: tmp_path / "forwarded_port")
+    monkeypatch.setattr(vpn, "watched_path", lambda: tmp_path / "watching")
     monkeypatch.setattr(vpn, "tunnel_device", lambda: None)
     names = {"CH": "Switzerland", "SE": "Sweden", "US": "United States"}
     monkeypatch.setattr(vpn, "_country_codes", lambda: types.SimpleNamespace(
