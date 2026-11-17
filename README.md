@@ -23,14 +23,18 @@ brew install stevelacey/tap/proton-vpn-cli
 protonvpn setup
 ```
 
-`protonvpn setup` asks for your Mac password once, so connecting doesn't need it again, then signs
-you in to your Proton account. Connecting needs root for `wg-quick`, `pfctl` and `networksetup`;
-setup installs a small root-owned helper that only does those, and only takes plain WireGuard configs.
-It also copies `wg-quick`, `wg`, `wireguard-go` and `bash` from Homebrew into a root-owned folder, since
-anything running as you can change Homebrew's files; the helper only runs those copies and macOS's own
-commands. Run `protonvpn setup` again to pick up Homebrew updates to them.
+`protonvpn setup` asks for your Mac password once, so connecting doesn't need it again, and signs you
+in to Proton. Run it again after Homebrew updates WireGuard.
 
-Or install it with `uv tool install proton-vpn-cli-macos` (or pipx), plus `brew install wireguard-tools bash gnupg`.
+Or install it with `uv tool install proton-vpn-cli-macos` (or pipx).
+
+### Dependencies
+
+The Homebrew formula installs these for you. You only need to install them yourself if you used uv or pipx:
+
+```sh
+brew install wireguard-tools bash gnupg
+```
 
 ## Use
 
@@ -72,6 +76,9 @@ protonvpn connect --help
   when you disconnect.
 - Switching servers over a dead tunnel disconnects it first, rather than waiting out Proton's API
   timeouts through it.
+- Connecting needs root, so setup installs a small root-owned helper that only runs `wg-quick`,
+  `pfctl` and `networksetup`, with plain WireGuard configs. It runs its own root-owned copies of
+  `wg-quick`, `wg`, `wireguard-go` and `bash`, since anything running as you can change Homebrew's.
 - Sign-in is kept in the macOS Keychain.
 - The release wheel includes the core libraries (`macos/vendor`) and the Rust extension.
 
