@@ -8,13 +8,13 @@
 
 A fork of the [Proton VPN CLI](https://github.com/ProtonVPN/proton-vpn-cli) that adds macOS support.
 
-## Better together
+## Related projects
 
 - **[Proton VPN Menu Bar](https://github.com/stevelacey/proton-vpn-menubar)**: status, countries and settings in your menu bar
 - **[Alfred Proton VPN](https://github.com/stevelacey/alfred-proton-vpn)**: `vpn swiss` from Alfred
 
-They all drive the same connection: connect from one and the others keep up. Use them instead of
-Proton's Mac app, not alongside it, since it runs its own VPN connection that these can't see or control.
+They share the same connection. Don't run Proton's Mac app at the same time, since it has its own
+connection that these can't see.
 
 ## Install
 
