@@ -44,7 +44,7 @@ def connection(ipv6=False, server_ipv6=False, custom_dns=None):
 def test_generate_config_with_protons_dns():
     assert connection()._generate_config().splitlines() == [
         "# Connection abc", "# Server CH#1", "[Interface]", "PrivateKey = PRIVATEKEY",
-        "Address = 10.2.0.2/32", "DNS = 10.2.0.1", "", "[Peer]", "PublicKey = PUBKEY",
+        "Address = 10.2.0.2/32, fdd6:3fa9:2b00::2/128", "DNS = 10.2.0.1", "", "[Peer]", "PublicKey = PUBKEY",
         "AllowedIPs = 0.0.0.0/0, ::/0", "Endpoint = 185.1.2.3:51820"]
 
 

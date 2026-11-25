@@ -52,6 +52,10 @@ logger = logging.getLogger(__name__)
 # As in Proton's NetworkManager WireGuard backend.
 IPV4_ADDRESS, IPV4_DNS = f"{TUNNEL_IPV4}/32", "10.2.0.1"
 IPV6_ADDRESS, IPV6_DNS = "2a07:b944::2:2/128", "2a07:b944::2:1"
+# A private address for the tunnel when the server has no IPv6. macOS won't route
+# IPv6 into an interface without an IPv6 address, so without it IPv6 would leak
+# around the tunnel. Being private, it also makes apps prefer IPv4.
+IPV6_BLACKHOLE_ADDRESS = "fdd6:3fa9:2b00::2/128"
 
 BREW_BIN = "/opt/homebrew/bin"
 PATH = f"{BREW_BIN}:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
@@ -240,8 +244,10 @@ class WgQuickWireguard(VPNConnection, LocalAgentMixin):
         if self.enable_ipv6_support:
             addresses.append(IPV6_ADDRESS)
             dns += self._dns_servers(IPv6Address, IPV6_DNS)
+        else:
+            addresses.append(IPV6_BLACKHOLE_ADDRESS)
 
-        # IPv6 is routed into the tunnel even without an IPv6 address, where it's
+        # IPv6 is routed into the tunnel even when the server has none, where it's
         # dropped, so that it can't leak around the VPN.
         allowed_ips = ["0.0.0.0/0", "::/0"]
 
